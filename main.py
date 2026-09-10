@@ -1,4 +1,4 @@
-"""AI SURVIVAL BUSINESS - VERSION 7.2
+"""AI SURVIVAL BUSINESS - VERSION 7.3
 
 Real-business engine with zero starting capital.
 No fake sales, fake payments, fake customers, or automatic spam.
@@ -39,7 +39,7 @@ DELIVERY_DIR = "deliveries"
 def header():
     print("\n" + "=" * 70)
     print("             AI SURVIVAL BUSINESS")
-    print("             VERSION 7.2")
+    print("             VERSION 7.3")
     print("=" * 70)
     print("\nStarting capital: $0.00")
     print("Fake sales: DISABLED")
@@ -71,14 +71,15 @@ def run_market_research():
         print(f"   Commercial: {result.get('commercial', 0)}%")
         print(f"   Competition: {result.get('competition', 0)}%")
         print(f"   Trend: {result.get('trend', 0)}%")
-        print(f"   AI Score: {result.get('score', 0)}/100\n")
+        print(f"   Research Score: {result.get('score', 0)}/100\n")
 
     selected = ranked[0]
     print("=" * 70)
-    print("🧠 AI DECISION")
+    print("🧠 RESEARCH-BASED SELECTION")
     print("=" * 70)
     print(f"Selected opportunity: 👉 {selected.get('opportunity')}")
-    print(f"Opportunity score: {selected.get('score', 0)}/100\n")
+    print(f"Research score: {selected.get('score', 0)}/100")
+    print("Note: headline signals are market indicators, not proof of customer demand.\n")
     return selected
 
 
@@ -149,7 +150,6 @@ def qualify_prospects(prospects):
             print(f"   ⚠ Scoring error: {type(error).__name__}: {error}")
             score_data = {"score": 0, "priority": "LOW", "reasons": ["Scoring failed."]}
 
-        # Keep the original prospect fields. The scorer returns metadata only.
         result = dict(prospect)
         result.update(score_data if isinstance(score_data, dict) else {})
         result["_website_research"] = website_data
@@ -202,6 +202,8 @@ def load_orders():
 
 
 def save_orders(orders):
+    if not isinstance(orders, list):
+        raise TypeError("orders must be a list")
     with open(ORDERS_FILE, "w", encoding="utf-8") as file:
         json.dump(orders, file, indent=4, ensure_ascii=False)
 
@@ -362,16 +364,18 @@ def main():
     print("\n" + "=" * 70)
     print("9. ORDER + DELIVERY SYSTEM")
     print("=" * 70)
-    print("Order management: READY")
-    print("Payment verification: READY")
+    print("Order record creation: READY")
+    print("Payment request tracking: READY")
+    print("Payment verification: MANUAL CONFIRMATION ONLY")
     print("Delivery generation: READY")
     print("Payment-gated delivery: ENABLED")
+    print("Real gateway/webhook: NOT CONNECTED YET")
     print("No test order created.")
 
     try:
         add_memory({
             "event": "business_run",
-            "version": "7.2",
+            "version": "7.3",
             "city": city,
             "opportunity": selected.get("opportunity"),
             "opportunity_score": selected.get("score", 0),
@@ -399,16 +403,17 @@ def main():
         print(f"• {record.get('prospect')} | {record.get('status')} | ${record.get('price', 0)}")
 
     print("\n" + "=" * 70)
-    print("VERSION 7.2 COMPLETE")
+    print("VERSION 7.3 COMPLETE")
     print("=" * 70)
-    print("✅ Market research")
+    print("✅ Market research with explicit evidence limitation")
     print("✅ Product generation + persistence")
     print("✅ Public prospect discovery")
     print("✅ Website research")
     print("✅ Prospect scoring with preserved prospect data")
-    print("✅ Sales pipeline")
+    print("✅ Hardened sales pipeline persistence")
     print("✅ Outreach generation + human approval")
     print("✅ Verified-payment-only revenue")
+    print("✅ Transaction replay protection")
     print("✅ Payment-gated delivery architecture")
     print("✅ Persistent memory")
     print(f"\n💰 VERIFIED REVENUE: ${revenue:.2f}")
