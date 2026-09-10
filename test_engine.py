@@ -1,4 +1,5 @@
 import importlib
+import json
 import os
 import tempfile
 import unittest
@@ -78,6 +79,42 @@ class EngineSmokeTests(unittest.TestCase):
                 create_payment_request("order-2", 50)
                 self.assertFalse(verify_payment("order-2", "tx-123", confirmed=True))
                 self.assertEqual(verified_revenue(), 35.0)
+            finally:
+                os.chdir(original)
+
+    def test_payment_ledger_rejects_duplicate_order_records(self):
+        from payment_tracker import verify_payment
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd()
+            os.chdir(temp_dir)
+            try:
+                payments = [
+                    {"order_id": "order-1", "amount": 35, "status": "requested"},
+                    {"order_id": "order-1", "amount": 35, "status": "requested"},
+                ]
+                with open("payments.json", "w", encoding="utf-8") as file:
+                    json.dump(payments, file)
+                self.assertFalse(verify_payment("order-1", "tx-duplicate", confirmed=True))
+            finally:
+                os.chdir(original)
+
+    def test_verified_revenue_deduplicates_corrupt_records(self):
+        from payment_tracker import verified_payments, verified_revenue
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd()
+            os.chdir(temp_dir)
+            try:
+                payments = [
+                    {"order_id": "order-1", "amount": 35, "status": "verified", "transaction_id": "tx-1"},
+                    {"order_id": "order-1", "amount": 35, "status": "verified", "transaction_id": "tx-1"},
+                    {"order_id": "order-2", "amount": 50, "status": "verified", "transaction_id": "tx-2"},
+                ]
+                with open("payments.json", "w", encoding="utf-8") as file:
+                    json.dump(payments, file)
+                self.assertEqual(verified_revenue(), 85.0)
+                self.assertEqual(len(verified_payments()), 2)
             finally:
                 os.chdir(original)
 
