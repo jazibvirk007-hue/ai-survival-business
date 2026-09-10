@@ -14,6 +14,7 @@ class EngineSmokeTests(unittest.TestCase):
             "market_research",
             "memory",
             "outreach",
+            "order_manager",
             "payment_tracker",
             "product_factory",
             "prospect_database",
@@ -115,6 +116,74 @@ class EngineSmokeTests(unittest.TestCase):
                     json.dump(payments, file)
                 self.assertEqual(verified_revenue(), 85.0)
                 self.assertEqual(len(verified_payments()), 2)
+            finally:
+                os.chdir(original)
+
+    def test_order_lifecycle_payment_must_match_amount_and_currency(self):
+        from order_manager import OrderManager
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd()
+            os.chdir(temp_dir)
+            try:
+                manager = OrderManager()
+                order = manager.create_order("Customer", "Example Cafe", "Growth Kit", 35, "USD")
+
+                payments = manager.load_payment_records()
+                payments[0]["amount"] = 34
+                with open("payments.json", "w", encoding="utf-8") as file:
+                    json.dump(payments, file)
+                self.assertFalse(manager.confirm_payment(order["order_id"], "tx-amount", confirmed=True))
+
+                payments[0]["amount"] = 35
+                payments[0]["currency"] = "EUR"
+                with open("payments.json", "w", encoding="utf-8") as file:
+                    json.dump(payments, file)
+                self.assertFalse(manager.confirm_payment(order["order_id"], "tx-currency", confirmed=True))
+
+                self.assertEqual(manager.get_order(order["order_id"])["status"], "payment_pending")
+            finally:
+                os.chdir(original)
+
+    def test_order_lifecycle_blocks_delivery_until_verified_payment(self):
+        from order_manager import OrderManager
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd()
+            os.chdir(temp_dir)
+            try:
+                manager = OrderManager()
+                order = manager.create_order("Customer", "Example Cafe", "Growth Kit", 35)
+                self.assertFalse(manager.mark_delivered(order["order_id"], "deliveries/file.txt"))
+                self.assertFalse(manager.complete_order(order["order_id"]))
+
+                self.assertTrue(manager.confirm_payment(order["order_id"], "tx-paid", confirmed=True))
+                paid = manager.get_order(order["order_id"])
+                self.assertEqual(paid["status"], "paid")
+                self.assertEqual(paid["payment_status"], "paid")
+
+                self.assertTrue(manager.mark_delivered(order["order_id"], "deliveries/file.txt"))
+                delivered = manager.get_order(order["order_id"])
+                self.assertEqual(delivered["status"], "delivered")
+                self.assertTrue(manager.complete_order(order["order_id"]))
+                self.assertEqual(manager.get_order(order["order_id"])["status"], "completed")
+                self.assertTrue(manager.complete_order(order["order_id"]))
+            finally:
+                os.chdir(original)
+
+    def test_order_lifecycle_rejects_transaction_reuse(self):
+        from order_manager import OrderManager
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd()
+            os.chdir(temp_dir)
+            try:
+                manager = OrderManager()
+                first = manager.create_order("A", "Cafe A", "Growth Kit", 35)
+                second = manager.create_order("B", "Cafe B", "Growth Kit", 35)
+                self.assertTrue(manager.confirm_payment(first["order_id"], "tx-shared", confirmed=True))
+                self.assertFalse(manager.confirm_payment(second["order_id"], "tx-shared", confirmed=True))
+                self.assertEqual(manager.get_order(second["order_id"])["status"], "payment_pending")
             finally:
                 os.chdir(original)
 
