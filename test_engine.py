@@ -13,6 +13,7 @@ class EngineSmokeTests(unittest.TestCase):
             "main",
             "market_research",
             "memory",
+            "order_engine",
             "outreach",
             "payment_tracker",
             "product_factory",
@@ -115,6 +116,53 @@ class EngineSmokeTests(unittest.TestCase):
                     json.dump(payments, file)
                 self.assertEqual(verified_revenue(), 85.0)
                 self.assertEqual(len(verified_payments()), 2)
+            finally:
+                os.chdir(original)
+
+    def test_order_lifecycle_is_payment_gated(self):
+        from order_engine import create_order, get_order, mark_delivered, verify_order_payment
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd()
+            os.chdir(temp_dir)
+            try:
+                order = create_order(
+                    "ORD-TEST-1", "Customer", "Example Cafe", "Growth Kit", 35
+                )
+                self.assertEqual(order["status"], "payment_pending")
+                self.assertEqual(order["payment_status"], "unpaid")
+                self.assertFalse(mark_delivered("ORD-TEST-1", "deliveries/test.txt"))
+
+                self.assertFalse(verify_order_payment("ORD-TEST-1", "tx-1", confirmed=False))
+                self.assertEqual(get_order("ORD-TEST-1")["payment_status"], "unpaid")
+
+                self.assertTrue(verify_order_payment("ORD-TEST-1", "tx-1", confirmed=True))
+                paid = get_order("ORD-TEST-1")
+                self.assertEqual(paid["status"], "paid")
+                self.assertEqual(paid["payment_status"], "paid")
+                self.assertEqual(paid["delivery_status"], "ready")
+
+                self.assertTrue(mark_delivered("ORD-TEST-1", "deliveries/ORD-TEST-1.txt"))
+                delivered = get_order("ORD-TEST-1")
+                self.assertEqual(delivered["status"], "delivered")
+                self.assertEqual(delivered["delivery_status"], "delivered")
+            finally:
+                os.chdir(original)
+
+    def test_order_payment_amount_must_match(self):
+        from order_engine import create_order, get_order, verify_order_payment
+        from payment_tracker import load_payments, save_payments
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd()
+            os.chdir(temp_dir)
+            try:
+                create_order("ORD-TEST-2", "Customer", "Example Cafe", "Growth Kit", 35)
+                payments = load_payments()
+                payments[0]["amount"] = 34
+                save_payments(payments)
+                self.assertFalse(verify_order_payment("ORD-TEST-2", "tx-2", confirmed=True))
+                self.assertEqual(get_order("ORD-TEST-2")["payment_status"], "unpaid")
             finally:
                 os.chdir(original)
 
