@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+ai_memory.json
+prospects.json
+sales_pipeline.json
+payments.json
+orders.json
+generated_products/
+deliveries/
+.env
+.venv/
+venv/
