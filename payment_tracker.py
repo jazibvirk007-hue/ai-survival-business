@@ -17,6 +17,8 @@ def load_payments():
 
 
 def save_payments(payments):
+    if not isinstance(payments, list):
+        raise TypeError("payments must be a list")
     with open(PAYMENTS_FILE, "w", encoding="utf-8") as file:
         json.dump(payments, file, indent=4, ensure_ascii=False)
 
@@ -27,6 +29,9 @@ def create_payment_request(order_id, amount, currency="USD"):
     amount = float(amount)
     if amount <= 0:
         raise ValueError("payment amount must be greater than zero")
+    currency = str(currency or "USD").strip().upper()
+    if not currency:
+        raise ValueError("currency is required")
 
     payments = load_payments()
     for payment in payments:
@@ -34,7 +39,7 @@ def create_payment_request(order_id, amount, currency="USD"):
             return payment
 
     payment = {
-        "order_id": order_id,
+        "order_id": str(order_id),
         "amount": amount,
         "currency": currency,
         "status": "requested",
@@ -48,38 +53,53 @@ def create_payment_request(order_id, amount, currency="USD"):
 
 
 def verify_payment(order_id, transaction_id, confirmed=False):
-    """Mark a payment verified only after an independent confirmation.
+    """Verify an existing payment only after independent confirmation.
 
-    The engine never treats a caller-supplied transaction ID as proof by itself.
-    A real gateway/webhook or trusted manual verification must set confirmed=True.
-    A transaction ID may only be used once across payment records.
+    ``confirmed`` is deliberately explicit so a transaction ID alone can never
+    create revenue. In production this flag must be set by a trusted payment
+    provider/webhook or a controlled human-verification workflow, not by an
+    untrusted customer request.
     """
     if not order_id or not transaction_id or not confirmed:
         return False
 
+    order_id = str(order_id).strip()
     transaction_id = str(transaction_id).strip()
-    if not transaction_id:
+    if not order_id or not transaction_id:
         return False
 
     payments = load_payments()
-    for payment in payments:
+    matches = [payment for payment in payments if payment.get("order_id") == order_id]
+    if len(matches) != 1:
+        # Missing or duplicated order records are unsafe to verify automatically.
+        return False
+
+    payment = matches[0]
+    if payment.get("status") == "verified":
+        # Idempotent only for the exact same transaction.
+        return payment.get("transaction_id") == transaction_id
+
+    # A verified transaction reference may never be reused for another order.
+    for other in payments:
         if (
-            payment.get("transaction_id") == transaction_id
-            and payment.get("order_id") != order_id
-            and payment.get("status") == "verified"
+            other.get("order_id") != order_id
+            and other.get("transaction_id") == transaction_id
+            and other.get("status") == "verified"
         ):
             return False
 
-    for payment in payments:
-        if payment.get("order_id") == order_id:
-            if payment.get("status") == "verified":
-                return payment.get("transaction_id") == transaction_id
-            payment["status"] = "verified"
-            payment["transaction_id"] = transaction_id
-            payment["verified_at"] = datetime.now().isoformat()
-            save_payments(payments)
-            return True
-    return False
+    try:
+        amount = float(payment.get("amount", 0))
+    except (TypeError, ValueError):
+        return False
+    if amount <= 0:
+        return False
+
+    payment["status"] = "verified"
+    payment["transaction_id"] = transaction_id
+    payment["verified_at"] = datetime.now().isoformat()
+    save_payments(payments)
+    return True
 
 
 def get_payment(order_id):
@@ -88,12 +108,20 @@ def get_payment(order_id):
 
 def verified_revenue():
     total = 0.0
+    seen_orders = set()
     for payment in load_payments():
-        if payment.get("status") == "verified":
-            try:
-                total += float(payment.get("amount", 0))
-            except (TypeError, ValueError):
-                continue
+        if payment.get("status") != "verified":
+            continue
+        order_id = payment.get("order_id")
+        if order_id in seen_orders:
+            continue
+        try:
+            amount = float(payment.get("amount", 0))
+        except (TypeError, ValueError):
+            continue
+        if amount > 0:
+            total += amount
+            seen_orders.add(order_id)
     return total
 
 
@@ -102,4 +130,14 @@ def pending_payments():
 
 
 def verified_payments():
-    return [p for p in load_payments() if p.get("status") == "verified"]
+    payments = []
+    seen_orders = set()
+    for payment in load_payments():
+        if payment.get("status") != "verified":
+            continue
+        order_id = payment.get("order_id")
+        if order_id in seen_orders:
+            continue
+        seen_orders.add(order_id)
+        payments.append(payment)
+    return payments
