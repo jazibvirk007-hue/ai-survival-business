@@ -1,14 +1,12 @@
 """Safe, state-aware CEO chat for TJ Cortex."""
 
-from ai_provider import AIProvider
-
 
 class CortexCEOChat:
     """Turns business state into concise CEO conversations without exposing secrets."""
 
-    def __init__(self, provider: AIProvider, max_message_chars=4000):
-        if not isinstance(provider, AIProvider):
-            raise TypeError("provider must be an AIProvider")
+    def __init__(self, provider, max_message_chars=4000):
+        if provider is None or not callable(getattr(provider, "generate", None)):
+            raise TypeError("provider must expose a callable generate method")
         if not isinstance(max_message_chars, int) or max_message_chars < 100:
             raise ValueError("max_message_chars must be at least 100")
         self.provider = provider
