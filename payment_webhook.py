@@ -1,25 +1,4 @@
-"""Provider-neutral, signature-verified payment webhook adapter.
-
-V7.5 establishes the trust boundary for real payment providers without tying the
-business engine to a specific vendor. Providers should translate their webhook
-payload into the small canonical event schema accepted here.
-
-Canonical event JSON:
-{
-    "event_id": "evt_123",
-    "type": "payment.succeeded",
-    "order_id": "ORD-ABC",
-    "transaction_id": "txn_123",
-    "amount": 35.0,
-    "currency": "USD"
-}
-
-Required environment variable:
-PAYMENT_WEBHOOK_SECRET
-
-The secret is never stored in source control. Signature format is:
-sha256=<hex HMAC-SHA256 of the exact raw request body>
-"""
+"""Provider-neutral, signature-verified payment webhook adapter."""
 
 import hashlib
 import hmac
@@ -39,18 +18,27 @@ def _load_events():
     try:
         with open(EVENTS_FILE, "r", encoding="utf-8") as file:
             data = json.load(file)
-        return data if isinstance(data, list) else []
     except (OSError, ValueError, TypeError):
-        return []
+        # Replay protection must fail closed. Never treat corrupt state as empty.
+        raise RuntimeError("webhook event store is unavailable or corrupt")
+    if not isinstance(data, list) or any(not isinstance(item, str) or not item for item in data):
+        raise RuntimeError("webhook event store has invalid format")
+    return data
 
 
 def _save_events(events):
-    with open(EVENTS_FILE, "w", encoding="utf-8") as file:
+    if not isinstance(events, list):
+        raise TypeError("events must be a list")
+    directory = os.path.dirname(os.path.abspath(EVENTS_FILE))
+    temp_path = os.path.join(directory, f".{os.path.basename(EVENTS_FILE)}.tmp")
+    with open(temp_path, "w", encoding="utf-8") as file:
         json.dump(events, file, indent=4, ensure_ascii=False)
+        file.flush()
+        os.fsync(file.fileno())
+    os.replace(temp_path, EVENTS_FILE)
 
 
 def sign_payload(raw_body, secret):
-    """Return the canonical HMAC signature for a webhook body."""
     if not isinstance(raw_body, (bytes, bytearray)):
         raise TypeError("raw_body must be bytes")
     if not secret:
@@ -60,7 +48,6 @@ def sign_payload(raw_body, secret):
 
 
 def verify_signature(raw_body, signature, secret=None):
-    """Constant-time verify of a provider webhook signature."""
     if not isinstance(raw_body, (bytes, bytearray)) or not signature:
         return False
     secret = secret or os.getenv(WEBHOOK_SECRET_ENV)
@@ -79,12 +66,6 @@ def _parse_event(raw_body):
 
 
 def process_webhook(raw_body, signature, secret=None):
-    """Authenticate and process one canonical successful-payment event.
-
-    Returns a small result dictionary suitable for an HTTP 200/400/401 response.
-    No revenue is created unless the authenticated event matches an existing order
-    and its amount/currency/transaction ID pass the order engine's checks.
-    """
     if not verify_signature(raw_body, signature, secret):
         return {"ok": False, "status": 401, "error": "invalid signature"}
 
@@ -101,7 +82,10 @@ def process_webhook(raw_body, signature, secret=None):
     if event_type != SUPPORTED_EVENT:
         return {"ok": False, "status": 400, "error": "unsupported event type"}
 
-    events = _load_events()
+    try:
+        events = _load_events()
+    except RuntimeError as error:
+        return {"ok": False, "status": 503, "error": str(error)}
     if event_id in events:
         return {"ok": True, "status": 200, "duplicate": True, "event_id": event_id}
 
@@ -114,15 +98,21 @@ def process_webhook(raw_body, signature, secret=None):
         order_amount = float(order.get("amount"))
     except (TypeError, ValueError):
         return {"ok": False, "status": 400, "error": "invalid amount"}
+    if event_amount != order_amount:
+        return {"ok": False, "status": 400, "error": "payment does not match order"}
 
     event_currency = str(event.get("currency", "")).strip().upper()
     order_currency = str(order.get("currency", "")).strip().upper()
-    if event_amount != order_amount or event_currency != order_currency:
+    if event_currency != order_currency:
         return {"ok": False, "status": 400, "error": "payment does not match order"}
 
     if not verify_order_payment(order_id, transaction_id, confirmed=True):
         return {"ok": False, "status": 409, "error": "payment verification rejected"}
 
     events.append(event_id)
-    _save_events(events)
+    try:
+        _save_events(events)
+    except OSError:
+        # Payment verification is idempotent for the same transaction; provider retry is safe.
+        return {"ok": False, "status": 503, "error": "webhook event store unavailable"}
     return {"ok": True, "status": 200, "event_id": event_id, "order_id": order_id}
