@@ -83,10 +83,10 @@ class AICEO:
             candidates.append(Decision("find_prospects", 84, "A product exists but there are no qualified prospects.", "Build a real prospect pool without inventing customers."))
 
         if prospects > 0 and drafts == 0:
-            candidates.append(Decision("qualify_prospects", 80, "Prospect volume exists but outreach preparation is empty.", "Select the strongest real prospects for relevant outreach."))
+            candidates.append(Decision("qualify_prospects", 80, "Qualified prospect data exists but outreach preparation is empty.", "Prepare the strongest real prospects for relevant outreach."))
 
         if drafts > 0 and approved == 0:
-            candidates.append(Decision("draft_outreach", 76, "Qualified prospects exist without an outreach draft.", "Prepare personalized outreach for human/provider-approved sending."))
+            candidates.append(Decision("draft_outreach", 76, "Qualified prospects exist without an approved outreach draft.", "Prepare personalized outreach for human/provider-approved sending."))
 
         if approved > 0 and pending == 0:
             candidates.append(Decision("follow_up", 72, "Approved outreach exists but no resulting order is pending.", "Follow up through permitted channels and seek a real customer response.", True))
@@ -97,10 +97,13 @@ class AICEO:
         if revenue > 0 and not candidates:
             candidates.append(Decision("improve_offer", 55, "Revenue exists and no urgent operational blocker is visible.", "Use observed results to improve conversion or customer value."))
 
+        if cash < self.minimum_cash:
+            candidates.append(Decision("review_financials", 99, "Observed cash is below the configured survival floor.", "Protect liquidity and avoid discretionary spending until the floor is restored."))
+
         if not candidates:
             candidates.append(Decision("research_market", 50, "There is insufficient evidence for a higher-confidence action.", "Collect market evidence before making a consequential decision."))
 
-        return sorted(candidates, key=lambda item: item.priority, reverse=True)
+        return sorted(candidates, key=lambda item: item.priority, reverse=True)[: max(1, self.max_actions_per_cycle)]
 
     def decide(self, state: Dict[str, Any]) -> Decision:
         decision = self.evaluate(state)[0]
@@ -108,6 +111,7 @@ class AICEO:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "decision": decision.to_dict(),
             "verified_revenue": max(0.0, self._number(state, "verified_revenue")),
+            "cash": max(0.0, self._number(state, "cash", 0.0)),
         })
         return decision
 
@@ -117,5 +121,6 @@ class AICEO:
             "version": "8.0",
             "decisions_recorded": len(self.history),
             "max_actions_per_cycle": self.max_actions_per_cycle,
+            "minimum_cash": self.minimum_cash,
             "execution_policy": "decision_only; irreversible actions require explicit approval",
         }
