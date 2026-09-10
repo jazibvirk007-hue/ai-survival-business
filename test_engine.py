@@ -9,10 +9,9 @@ from unittest import mock
 class EngineSmokeTests(unittest.TestCase):
     def test_imports(self):
         modules = [
-            "ai_brain", "ai_ceo", "business", "main", "market_research", "memory",
-            "order_engine", "outreach", "payment_tracker", "payment_webhook",
-            "product_factory", "prospect_database", "prospect_research",
-            "prospect_scoring", "sales_engine", "website_research",
+            "ai_brain", "ai_ceo", "ceo_loop", "business", "main", "market_research", "memory",
+            "order_engine", "outreach", "payment_tracker", "payment_webhook", "product_factory",
+            "prospect_database", "prospect_research", "prospect_scoring", "sales_engine", "website_research",
         ]
         for module in modules:
             with self.subTest(module=module):
