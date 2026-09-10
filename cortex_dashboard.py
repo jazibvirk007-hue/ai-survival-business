@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 from ai_ceo import AICEO
 from ai_provider import provider_from_env
 from cortex_chat import CortexCEOChat
+from cortex_learning import CortexLearning
+from cortex_memory import CortexMemory
 from order_engine import load_orders
 from payment_tracker import pending_payments, verified_payments, verified_revenue
 
@@ -79,13 +81,13 @@ def build_snapshot():
 
     try:
         provider = provider_from_env()
-        provider_config = {"mode": provider.mode, "model": provider.model, "base_url": provider.base_url}
+        provider_config = {"mode": provider.config.mode, "model": provider.config.model, "base_url": provider.config.normalized_base_url}
     except Exception as error:
         provider_config = {"mode": "invalid", "model": "", "base_url": "", "error": type(error).__name__}
 
     return {
         "system": "TJ Cortex",
-        "version": "command-center-2",
+        "version": "command-center-3",
         "ledger": ledger_status,
         "orders": orders_count,
         "verified_payments": verified_count,
@@ -99,8 +101,12 @@ def build_snapshot():
 
 
 def build_chat_state():
-    """Return a chat-safe state snapshot; never expose raw ledger records."""
+    """Return a chat-safe state snapshot plus bounded learning context."""
     snapshot = build_snapshot()
+    try:
+        memory_context = CortexLearning(CortexMemory()).context(10)
+    except Exception:
+        memory_context = []
     return {
         "revenue": snapshot["verified_revenue"],
         "pending_orders": snapshot["pending_payments"],
@@ -110,6 +116,7 @@ def build_chat_state():
         "approval_required": snapshot["ceo"]["approval_required"],
         "ai_mode": snapshot["ai_provider"]["mode"],
         "ai_model": snapshot["ai_provider"]["model"],
+        "learning_context": memory_context,
     }
 
 
