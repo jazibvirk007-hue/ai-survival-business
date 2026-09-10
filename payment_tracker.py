@@ -115,8 +115,7 @@ def verify_payment(order_id, transaction_id, confirmed=False):
         ):
             return False
 
-    amount = _money(payment.get("amount"))
-    if amount is None:
+    if _money(payment.get("amount")) is None:
         return False
 
     payment["status"] = "verified"
@@ -124,6 +123,46 @@ def verify_payment(order_id, transaction_id, confirmed=False):
     payment["verified_at"] = datetime.now().isoformat()
     save_payments(payments)
     return True
+
+
+def rollback_verified_payment(order_id, transaction_id):
+    """Revert only the exact payment newly verified by a failed order transaction."""
+    order_id = str(order_id or "").strip()
+    transaction_id = str(transaction_id or "").strip()
+    if not order_id or not transaction_id:
+        return False
+
+    payments = load_payments()
+    matches = [payment for payment in payments if payment.get("order_id") == order_id]
+    if len(matches) != 1:
+        return False
+    payment = matches[0]
+    if payment.get("status") != "verified" or payment.get("transaction_id") != transaction_id:
+        return False
+
+    payment["status"] = "requested"
+    payment["transaction_id"] = None
+    payment["verified_at"] = None
+    save_payments(payments)
+    return True
+
+
+def delete_payment_request(order_id):
+    """Delete only an unverified payment request during order-creation compensation."""
+    order_id = str(order_id or "").strip()
+    if not order_id:
+        return False
+    payments = load_payments()
+    kept = []
+    removed = False
+    for payment in payments:
+        if payment.get("order_id") == order_id and payment.get("status") == "requested":
+            removed = True
+            continue
+        kept.append(payment)
+    if removed:
+        save_payments(kept)
+    return removed
 
 
 def get_payment(order_id):
