@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import importlib
 import json
 import os
@@ -10,9 +12,9 @@ class EngineSmokeTests(unittest.TestCase):
     def test_imports(self):
         modules = [
             "ai_brain", "business", "main", "market_research", "memory",
-            "order_engine", "outreach", "payment_tracker", "product_factory",
-            "prospect_database", "prospect_research", "prospect_scoring",
-            "sales_engine", "website_research",
+            "order_engine", "outreach", "payment_tracker", "payment_webhook",
+            "product_factory", "prospect_database", "prospect_research",
+            "prospect_scoring", "sales_engine", "website_research",
         ]
         for module in modules:
             with self.subTest(module=module):
@@ -114,6 +116,42 @@ class EngineSmokeTests(unittest.TestCase):
                         order_engine.create_order("ORD-ROLLBACK", "Customer", "Cafe", "Kit", 25)
                 self.assertIsNone(order_engine.get_order("ORD-ROLLBACK"))
                 self.assertEqual(order_engine.load_orders(), [])
+            finally: os.chdir(original)
+
+    def test_webhook_requires_valid_signature(self):
+        from payment_webhook import process_webhook
+        body = json.dumps({"event_id": "evt-1", "type": "payment.succeeded", "order_id": "ORD-TEST", "transaction_id": "tx-1", "amount": 35, "currency": "USD"}).encode()
+        self.assertEqual(process_webhook(body, "sha256=bad", "secret")["status"], 401)
+
+    def test_webhook_verifies_and_is_idempotent(self):
+        from order_engine import create_order, get_order
+        from payment_webhook import process_webhook, sign_payload
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd(); os.chdir(temp_dir)
+            try:
+                create_order("ORD-WEBHOOK", "Customer", "Cafe", "Kit", 35, "USD")
+                body = json.dumps({"event_id": "evt-1", "type": "payment.succeeded", "order_id": "ORD-WEBHOOK", "transaction_id": "tx-web-1", "amount": 35, "currency": "USD"}, separators=(",", ":")).encode()
+                signature = sign_payload(body, "secret")
+                result = process_webhook(body, signature, "secret")
+                self.assertTrue(result["ok"])
+                self.assertEqual(get_order("ORD-WEBHOOK")["payment_status"], "paid")
+                duplicate = process_webhook(body, signature, "secret")
+                self.assertTrue(duplicate["ok"])
+                self.assertTrue(duplicate["duplicate"])
+            finally: os.chdir(original)
+
+    def test_webhook_rejects_amount_or_currency_mismatch(self):
+        from order_engine import create_order, get_order
+        from payment_webhook import process_webhook, sign_payload
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd(); os.chdir(temp_dir)
+            try:
+                create_order("ORD-WEBHOOK-2", "Customer", "Cafe", "Kit", 35, "USD")
+                body = json.dumps({"event_id": "evt-2", "type": "payment.succeeded", "order_id": "ORD-WEBHOOK-2", "transaction_id": "tx-web-2", "amount": 34, "currency": "USD"}).encode()
+                result = process_webhook(body, sign_payload(body, "secret"), "secret")
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["status"], 400)
+                self.assertEqual(get_order("ORD-WEBHOOK-2")["payment_status"], "unpaid")
             finally: os.chdir(original)
 
     def test_url_normalization(self):
