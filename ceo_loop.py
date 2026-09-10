@@ -29,8 +29,9 @@ class CEOLoop:
         """Observe, decide, and optionally execute one safe handler.
 
         Approval-required decisions create a Guard request. Execution of such a
-        decision requires the matching, unexpired approval id and consumes it
-        before the handler runs, preventing approval replay.
+        decision requires the matching, unexpired approval id. The approval is
+        consumed only after a handler is confirmed to exist, so a configuration
+        error cannot burn a valid human approval.
         """
         if not isinstance(state, dict):
             raise TypeError("state must be a dictionary")
@@ -52,20 +53,20 @@ class CEOLoop:
             elif not approval_id:
                 result["outcome"] = "approval_required"
             else:
-                try:
-                    approval = self.guard.consume(approval_id, decision.action)
-                    result["approval_id"] = approval["id"]
-                    handler = self.handlers.get(decision.action)
-                    if handler is None:
-                        result["outcome"] = "handler_not_registered"
-                    else:
+                handler = self.handlers.get(decision.action)
+                if handler is None:
+                    result["outcome"] = "handler_not_registered"
+                else:
+                    try:
+                        approval = self.guard.consume(approval_id, decision.action)
+                        result["approval_id"] = approval["id"]
                         try:
                             result["outcome"] = handler(dict(state))
                             result["executed"] = True
                         except Exception as error:
                             result["outcome"] = f"handler_failed: {type(error).__name__}: {error}"
-                except (KeyError, ValueError) as error:
-                    result["outcome"] = f"approval_denied: {error}"
+                    except (KeyError, ValueError) as error:
+                        result["outcome"] = f"approval_denied: {error}"
         elif execute:
             handler = self.handlers.get(decision.action)
             if handler is None:
