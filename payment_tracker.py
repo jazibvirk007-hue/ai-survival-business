@@ -52,15 +52,30 @@ def verify_payment(order_id, transaction_id, confirmed=False):
 
     The engine never treats a caller-supplied transaction ID as proof by itself.
     A real gateway/webhook or trusted manual verification must set confirmed=True.
+    A transaction ID may only be used once across payment records.
     """
     if not order_id or not transaction_id or not confirmed:
         return False
 
+    transaction_id = str(transaction_id).strip()
+    if not transaction_id:
+        return False
+
     payments = load_payments()
     for payment in payments:
+        if (
+            payment.get("transaction_id") == transaction_id
+            and payment.get("order_id") != order_id
+            and payment.get("status") == "verified"
+        ):
+            return False
+
+    for payment in payments:
         if payment.get("order_id") == order_id:
+            if payment.get("status") == "verified":
+                return payment.get("transaction_id") == transaction_id
             payment["status"] = "verified"
-            payment["transaction_id"] = str(transaction_id)
+            payment["transaction_id"] = transaction_id
             payment["verified_at"] = datetime.now().isoformat()
             save_payments(payments)
             return True
