@@ -27,7 +27,6 @@ class EngineSmokeTests(unittest.TestCase):
         from outreach import OutreachGenerator
         from product_factory import ProductFactory
         from prospect_scoring import ProspectScorer
-        from website_research import WebsiteResearcher
 
         prospect = {
             "name": "Example Cafe",
@@ -39,9 +38,20 @@ class EngineSmokeTests(unittest.TestCase):
             "small business marketing service",
             {"opportunity": "small business marketing service", "score": 80},
         )
-        website_data = WebsiteResearcher()._failure(
-            "https://example.com", "test fixture"
-        )
+
+        # Keep this smoke test deterministic: do not make a real HTTP request.
+        # This represents a successfully researched public website.
+        website_data = {
+            "success": True,
+            "website": "https://example.com",
+            "title": "Example Cafe",
+            "text_length": 900,
+            "signals": {
+                "social_media": ["instagram"],
+                "marketing": ["special offer", "book now"],
+            },
+        }
+
         score = ProspectScorer().score(prospect, website_data)
         self.assertGreaterEqual(score["score"], 50)
 
