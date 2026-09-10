@@ -5,6 +5,7 @@ prospects.json
 sales_pipeline.json
 payments.json
 orders.json
+webhook_events.json
 generated_products/
 deliveries/
 .env
