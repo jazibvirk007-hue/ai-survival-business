@@ -7,43 +7,37 @@ class Business:
         self.products = []
         self.sales = []
 
-    def create_product(self, name, price, cost):
-        product = {
-            "name": name,
-            "price": price,
-            "cost": cost
-        }
-
+    def create_product(self, name, price, cost=0):
+        cost = float(cost)
+        if cost < 0:
+            raise ValueError("cost cannot be negative")
+        product = {"name": name, "price": float(price), "cost": cost}
         self.products.append(product)
         self.expenses += cost
         self.money -= cost
-
         return product
 
     def make_sale(self, product, customer):
-        price = product["price"]
+        """Record an in-memory sale for internal use only.
 
-        self.revenue += price
-        self.money += price
-        self.customers += 1
-
-        sale = {
-            "product": product["name"],
-            "customer": customer,
-            "amount": price
-        }
-
+        Real revenue should be synchronized from verified payment records,
+        not created by calling this method.
+        """
+        price = float(product["price"])
+        sale = {"product": product["name"], "customer": customer, "amount": price}
         self.sales.append(sale)
-
         return sale
+
+    def sync_verified_financials(self, revenue, customers=0):
+        self.revenue = max(0.0, float(revenue))
+        self.customers = max(0, int(customers))
+        self.money = self.revenue - self.expenses
 
     def survival_score(self):
         if self.money < 0:
             return 0
-
         if self.money == 0:
             return 50
-
         return min(100, 50 + self.money * 5)
 
     def status(self):
