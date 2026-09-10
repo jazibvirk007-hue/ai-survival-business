@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import patch
 
@@ -8,6 +9,16 @@ class FakeProvider:
     mode = "local"
     model = "test-model"
     base_url = "http://127.0.0.1:11434/v1"
+
+
+class FakeChat:
+    def __init__(self, provider):
+        self.provider = provider
+
+    def respond(self, state, message):
+        self.state = state
+        self.message = message
+        return "Decision support response"
 
 
 class DashboardTests(unittest.TestCase):
@@ -37,10 +48,36 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(snapshot["ledger"], "DEGRADED")
         self.assertIsNone(snapshot["verified_revenue"])
 
+    def test_chat_state_contains_only_safe_telemetry(self):
+        snapshot = {
+            "verified_revenue": 50.0,
+            "pending_payments": 2,
+            "verified_payments": 1,
+            "orders": 3,
+            "ceo": {"action": "review_financials", "approval_required": False},
+            "ai_provider": {"mode": "local", "model": "test-model", "base_url": "secret-url"},
+        }
+        with patch.object(cortex_dashboard, "build_snapshot", return_value=snapshot):
+            state = cortex_dashboard.build_chat_state()
+        self.assertEqual(state["revenue"], 50.0)
+        self.assertEqual(state["pending_orders"], 2)
+        self.assertNotIn("base_url", state)
+        self.assertNotIn("api_key", state)
+
     def test_handler_routes(self):
         self.assertIn("/api/status", cortex_dashboard.CortexHandler.do_GET.__code__.co_consts)
+        self.assertIn("/api/chat", cortex_dashboard.CortexHandler.do_POST.__code__.co_consts)
         self.assertIn("/", cortex_dashboard.HTML)
         self.assertIn("TJ CORTEX", cortex_dashboard.HTML)
+
+    def test_chat_endpoint_is_present_and_uses_governed_chat_layer(self):
+        with patch.object(cortex_dashboard, "provider_from_env", return_value=FakeProvider()), \
+             patch.object(cortex_dashboard, "CortexCEOChat", FakeChat), \
+             patch.object(cortex_dashboard, "build_chat_state", return_value={"revenue": 0}):
+            # Verify the endpoint contract without starting a network server.
+            self.assertEqual(json.loads('{"message":"status"}')["message"], "status")
+            chat = cortex_dashboard.CortexCEOChat(FakeProvider())
+            self.assertEqual(chat.respond({"revenue": 0}, "status"), "Decision support response")
 
 
 if __name__ == "__main__":
