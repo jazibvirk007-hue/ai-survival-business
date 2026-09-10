@@ -34,11 +34,18 @@ def save_payments(payments):
         raise TypeError("payments must be a list")
     directory = os.path.dirname(os.path.abspath(PAYMENTS_FILE))
     temp_path = os.path.join(directory, f".{os.path.basename(PAYMENTS_FILE)}.tmp")
-    with open(temp_path, "w", encoding="utf-8") as file:
-        json.dump(payments, file, indent=4, ensure_ascii=False)
-        file.flush()
-        os.fsync(file.fileno())
-    os.replace(temp_path, PAYMENTS_FILE)
+    try:
+        with open(temp_path, "w", encoding="utf-8") as file:
+            json.dump(payments, file, indent=4, ensure_ascii=False)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_path, PAYMENTS_FILE)
+    finally:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except OSError:
+            pass
 
 
 def create_payment_request(order_id, amount, currency="USD"):
