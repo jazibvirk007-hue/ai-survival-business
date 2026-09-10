@@ -2,6 +2,8 @@
 
 import json
 import os
+import re
+import tempfile
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
@@ -9,6 +11,7 @@ from payment_tracker import create_payment_request, get_payment, verify_payment
 
 ORDERS_FILE = "orders.json"
 ORDER_STATUSES = {"payment_pending", "paid", "delivery_ready", "delivered", "cancelled"}
+CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 
 
 def _now():
@@ -25,27 +28,41 @@ def _money(value):
     return amount.quantize(Decimal("0.01"))
 
 
+def _currency(value):
+    currency = str(value or "USD").strip().upper()
+    return currency if CURRENCY_RE.fullmatch(currency) else None
+
+
 def load_orders():
     if not os.path.exists(ORDERS_FILE):
         return []
     try:
         with open(ORDERS_FILE, "r", encoding="utf-8") as file:
             data = json.load(file)
-        return data if isinstance(data, list) else []
-    except (OSError, ValueError, TypeError):
-        return []
+    except (OSError, ValueError, TypeError) as error:
+        raise RuntimeError("order ledger is unavailable or corrupt") from error
+    if not isinstance(data, list):
+        raise RuntimeError("order ledger has invalid format")
+    return data
 
 
 def save_orders(orders):
     if not isinstance(orders, list):
         raise TypeError("orders must be a list")
     directory = os.path.dirname(os.path.abspath(ORDERS_FILE))
-    temp_path = os.path.join(directory, f".{os.path.basename(ORDERS_FILE)}.tmp")
-    with open(temp_path, "w", encoding="utf-8") as file:
-        json.dump(orders, file, indent=4, ensure_ascii=False)
-        file.flush()
-        os.fsync(file.fileno())
-    os.replace(temp_path, ORDERS_FILE)
+    fd, temp_path = tempfile.mkstemp(prefix=".orders-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            json.dump(orders, file, indent=4, ensure_ascii=False)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_path, ORDERS_FILE)
+    finally:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except OSError:
+            pass
 
 
 def get_order(order_id):
@@ -61,9 +78,9 @@ def create_order(order_id, customer, business_name, product_name, amount, curren
     amount = _money(amount)
     if amount is None:
         raise ValueError("order amount must be greater than zero and valid")
-    currency = str(currency or "USD").strip().upper()
-    if not currency:
-        raise ValueError("currency is required")
+    currency = _currency(currency)
+    if currency is None:
+        raise ValueError("currency must be a 3-letter code")
 
     orders = load_orders()
     existing = next((order for order in orders if order.get("order_id") == order_id), None)
@@ -124,11 +141,12 @@ def verify_order_payment(order_id, transaction_id, confirmed=False):
     if order_amount is None or payment_amount is None or order_amount != payment_amount:
         return False
 
-    order_currency = str(order.get("currency", "USD")).strip().upper()
-    payment_currency = str(payment.get("currency", "USD")).strip().upper()
-    if order_currency != payment_currency:
+    order_currency = _currency(order.get("currency"))
+    payment_currency = _currency(payment.get("currency"))
+    if order_currency is None or payment_currency is None or order_currency != payment_currency:
         return False
 
+    already_verified = payment.get("status") == "verified"
     if not verify_payment(order_id, transaction_id, confirmed=confirmed):
         return False
 
@@ -137,11 +155,18 @@ def verify_order_payment(order_id, transaction_id, confirmed=False):
     updated["payment_status"] = "paid"
     updated["delivery_status"] = "ready"
     updated["paid_at"] = payment.get("verified_at") or _now()
-    return _save_updated_order(updated)
+    try:
+        return _save_updated_order(updated)
+    except Exception:
+        if not already_verified:
+            # The payment was newly verified but the order state could not be committed.
+            # A later provider retry can safely reconcile the order again.
+            pass
+        raise
 
 
 def mark_delivered(order_id, delivery_file):
-    """Record delivery only for an independently paid order and safe path."""
+    """Record delivery only for an independently paid order and safe relative path."""
     order = get_order(order_id)
     if order is None or order.get("payment_status") != "paid":
         return False
@@ -149,6 +174,8 @@ def mark_delivered(order_id, delivery_file):
         return False
     path = os.path.normpath(str(delivery_file).strip())
     if path in ("", ".") or os.path.isabs(path) or path.startswith(".." + os.sep) or path == "..":
+        return False
+    if not path.startswith("deliveries" + os.sep):
         return False
 
     updated = dict(order)
