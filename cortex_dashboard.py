@@ -44,6 +44,14 @@ def _ceo_state(pending_count):
     }
 
 
+def _provider_summary(provider):
+    config = getattr(provider, "config", None)
+    mode = getattr(config, "mode", getattr(provider, "mode", ""))
+    model = getattr(config, "model", getattr(provider, "model", ""))
+    base_url = getattr(config, "normalized_base_url", getattr(provider, "base_url", ""))
+    return {"mode": mode, "model": model, "base_url": base_url}
+
+
 def build_snapshot():
     """Return dashboard telemetry derived only from real engine state."""
     orders = _safe_list(load_orders)
@@ -80,8 +88,7 @@ def build_snapshot():
         ceo = {"action": "unavailable", "priority": 0, "reason": type(error).__name__, "approval_required": True}
 
     try:
-        provider = provider_from_env()
-        provider_config = {"mode": provider.config.mode, "model": provider.config.model, "base_url": provider.config.normalized_base_url}
+        provider_config = _provider_summary(provider_from_env())
     except Exception as error:
         provider_config = {"mode": "invalid", "model": "", "base_url": "", "error": type(error).__name__}
 
