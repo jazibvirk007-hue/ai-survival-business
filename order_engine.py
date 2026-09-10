@@ -7,7 +7,7 @@ import tempfile
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
-from payment_tracker import create_payment_request, get_payment, verify_payment
+from payment_tracker import create_payment_request, delete_payment_request, get_payment, rollback_verified_payment, verify_payment
 
 ORDERS_FILE = "orders.json"
 ORDER_STATUSES = {"payment_pending", "paid", "delivery_ready", "delivered", "cancelled"}
@@ -108,8 +108,11 @@ def create_order(order_id, customer, business_name, product_name, amount, curren
     try:
         create_payment_request(order_id, amount, currency)
     except Exception:
-        rollback = [item for item in load_orders() if item.get("order_id") != order_id]
-        save_orders(rollback)
+        try:
+            delete_payment_request(order_id)
+        finally:
+            rollback = [item for item in load_orders() if item.get("order_id") != order_id]
+            save_orders(rollback)
         raise
     return order
 
@@ -154,14 +157,16 @@ def verify_order_payment(order_id, transaction_id, confirmed=False):
     updated["status"] = "paid"
     updated["payment_status"] = "paid"
     updated["delivery_status"] = "ready"
-    updated["paid_at"] = payment.get("verified_at") or _now()
+    payment_after = get_payment(order_id)
+    updated["paid_at"] = (payment_after or {}).get("verified_at") or _now()
     try:
         return _save_updated_order(updated)
     except Exception:
         if not already_verified:
-            # The payment was newly verified but the order state could not be committed.
-            # A later provider retry can safely reconcile the order again.
-            pass
+            try:
+                rollback_verified_payment(order_id, transaction_id)
+            except Exception as rollback_error:
+                raise RuntimeError("order commit failed and payment rollback also failed") from rollback_error
         raise
 
 
