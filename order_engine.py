@@ -1,29 +1,28 @@
-"""Order lifecycle for real, payment-gated digital delivery.
-
-Payment verification remains separate from customer input. An order becomes paid
-only after payment_tracker.verify_payment() accepts an independently confirmed
-transaction, and delivery is blocked until that state exists.
-"""
+"""Order lifecycle for real, payment-gated digital delivery."""
 
 import json
 import os
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from payment_tracker import create_payment_request, get_payment, verify_payment
 
 ORDERS_FILE = "orders.json"
-
-ORDER_STATUSES = {
-    "payment_pending",
-    "paid",
-    "delivery_ready",
-    "delivered",
-    "cancelled",
-}
+ORDER_STATUSES = {"payment_pending", "paid", "delivery_ready", "delivered", "cancelled"}
 
 
 def _now():
     return datetime.now().isoformat()
+
+
+def _money(value):
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not amount.is_finite() or amount <= 0:
+        return None
+    return amount.quantize(Decimal("0.01"))
 
 
 def load_orders():
@@ -40,8 +39,13 @@ def load_orders():
 def save_orders(orders):
     if not isinstance(orders, list):
         raise TypeError("orders must be a list")
-    with open(ORDERS_FILE, "w", encoding="utf-8") as file:
+    directory = os.path.dirname(os.path.abspath(ORDERS_FILE))
+    temp_path = os.path.join(directory, f".{os.path.basename(ORDERS_FILE)}.tmp")
+    with open(temp_path, "w", encoding="utf-8") as file:
         json.dump(orders, file, indent=4, ensure_ascii=False)
+        file.flush()
+        os.fsync(file.fileno())
+    os.replace(temp_path, ORDERS_FILE)
 
 
 def get_order(order_id):
@@ -51,20 +55,12 @@ def get_order(order_id):
 
 
 def create_order(order_id, customer, business_name, product_name, amount, currency="USD"):
-    """Create one payment-pending order and its matching payment request.
-
-    The order write is rolled back if payment-request creation fails, preventing
-    an order from being left in a payment-pending state without a payment record.
-    """
     order_id = str(order_id or "").strip()
     if not order_id:
         raise ValueError("order_id is required")
-    try:
-        amount = float(amount)
-    except (TypeError, ValueError):
-        raise ValueError("order amount must be a valid number") from None
-    if amount <= 0:
-        raise ValueError("order amount must be greater than zero")
+    amount = _money(amount)
+    if amount is None:
+        raise ValueError("order amount must be greater than zero and valid")
     currency = str(currency or "USD").strip().upper()
     if not currency:
         raise ValueError("currency is required")
@@ -79,7 +75,7 @@ def create_order(order_id, customer, business_name, product_name, amount, curren
         "customer": str(customer or "").strip(),
         "business_name": str(business_name or "").strip(),
         "product": str(product_name or "").strip(),
-        "amount": amount,
+        "amount": float(amount),
         "currency": currency,
         "status": "payment_pending",
         "payment_status": "unpaid",
@@ -115,11 +111,6 @@ def _save_updated_order(updated):
 
 
 def verify_order_payment(order_id, transaction_id, confirmed=False):
-    """Verify payment and move the order into the paid state.
-
-    ``confirmed=True`` is valid only for independently verified provider/webhook
-    data or a controlled human workflow. Order amount and currency must match.
-    """
     order = get_order(order_id)
     if order is None or order.get("status") == "delivered":
         return False
@@ -128,13 +119,9 @@ def verify_order_payment(order_id, transaction_id, confirmed=False):
     if payment is None:
         return False
 
-    try:
-        order_amount = float(order.get("amount", 0))
-        payment_amount = float(payment.get("amount", 0))
-    except (TypeError, ValueError):
-        return False
-
-    if order_amount <= 0 or payment_amount <= 0 or order_amount != payment_amount:
+    order_amount = _money(order.get("amount"))
+    payment_amount = _money(payment.get("amount"))
+    if order_amount is None or payment_amount is None or order_amount != payment_amount:
         return False
 
     order_currency = str(order.get("currency", "USD")).strip().upper()
@@ -154,17 +141,20 @@ def verify_order_payment(order_id, transaction_id, confirmed=False):
 
 
 def mark_delivered(order_id, delivery_file):
-    """Record delivery only for an independently paid order."""
+    """Record delivery only for an independently paid order and safe path."""
     order = get_order(order_id)
     if order is None or order.get("payment_status") != "paid":
         return False
     if not delivery_file:
         return False
+    path = os.path.normpath(str(delivery_file).strip())
+    if path in ("", ".") or os.path.isabs(path) or path.startswith(".." + os.sep) or path == "..":
+        return False
 
     updated = dict(order)
     updated["status"] = "delivered"
     updated["delivery_status"] = "delivered"
-    updated["delivery_file"] = str(delivery_file)
+    updated["delivery_file"] = path
     updated["delivered_at"] = _now()
     return _save_updated_order(updated)
 
