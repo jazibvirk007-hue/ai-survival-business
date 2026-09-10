@@ -1,4 +1,6 @@
 import importlib
+import os
+import tempfile
 import unittest
 
 
@@ -39,8 +41,6 @@ class EngineSmokeTests(unittest.TestCase):
             {"opportunity": "small business marketing service", "score": 80},
         )
 
-        # Keep this smoke test deterministic: do not make a real HTTP request.
-        # This represents a successfully researched public website.
         website_data = {
             "success": True,
             "website": "https://example.com",
@@ -61,15 +61,49 @@ class EngineSmokeTests(unittest.TestCase):
         self.assertIn("Example Cafe", draft["message"])
 
     def test_payment_requires_confirmation(self):
-        from payment_tracker import verify_payment
-        self.assertFalse(verify_payment("missing-order", "tx-123"))
-        self.assertFalse(verify_payment("missing-order", "tx-123", confirmed=False))
+        from payment_tracker import create_payment_request, verify_payment, verified_revenue
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd()
+            os.chdir(temp_dir)
+            try:
+                create_payment_request("order-1", 35)
+                self.assertFalse(verify_payment("order-1", "tx-123"))
+                self.assertFalse(verify_payment("order-1", "tx-123", confirmed=False))
+                self.assertEqual(verified_revenue(), 0.0)
+                self.assertTrue(verify_payment("order-1", "tx-123", confirmed=True))
+                self.assertEqual(verified_revenue(), 35.0)
+                self.assertTrue(verify_payment("order-1", "tx-123", confirmed=True))
+
+                create_payment_request("order-2", 50)
+                self.assertFalse(verify_payment("order-2", "tx-123", confirmed=True))
+                self.assertEqual(verified_revenue(), 35.0)
+            finally:
+                os.chdir(original)
 
     def test_url_normalization(self):
         from website_research import WebsiteResearcher
         researcher = WebsiteResearcher()
         self.assertEqual(researcher.normalize_url("example.com"), "https://example.com")
         self.assertEqual(researcher.normalize_url("https.//example.com"), "https://example.com")
+
+    def test_sales_pipeline_rejects_corrupt_non_list_file(self):
+        from sales_engine import SalesEngine
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = os.path.join(temp_dir, "pipeline.json")
+            with open(path, "w", encoding="utf-8") as file:
+                file.write('{"unexpected": "object"}')
+            self.assertEqual(SalesEngine(path).load(), [])
+
+    def test_business_financials_only_use_verified_values(self):
+        from business import Business
+
+        business = Business()
+        business.sync_verified_financials(0, 0)
+        self.assertEqual(business.revenue, 0.0)
+        self.assertEqual(business.money, 0.0)
+        self.assertEqual(business.customers, 0)
 
 
 if __name__ == "__main__":
