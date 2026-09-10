@@ -4,12 +4,24 @@ import hashlib
 import hmac
 import json
 import os
+import tempfile
+from decimal import Decimal, InvalidOperation
 
 from order_engine import get_order, verify_order_payment
 
 WEBHOOK_SECRET_ENV = "PAYMENT_WEBHOOK_SECRET"
 EVENTS_FILE = "webhook_events.json"
 SUPPORTED_EVENT = "payment.succeeded"
+
+
+def _money(value):
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not amount.is_finite() or amount <= 0:
+        return None
+    return amount.quantize(Decimal("0.01"))
 
 
 def _load_events():
@@ -19,7 +31,6 @@ def _load_events():
         with open(EVENTS_FILE, "r", encoding="utf-8") as file:
             data = json.load(file)
     except (OSError, ValueError, TypeError):
-        # Replay protection must fail closed. Never treat corrupt state as empty.
         raise RuntimeError("webhook event store is unavailable or corrupt")
     if not isinstance(data, list) or any(not isinstance(item, str) or not item for item in data):
         raise RuntimeError("webhook event store has invalid format")
@@ -30,12 +41,19 @@ def _save_events(events):
     if not isinstance(events, list):
         raise TypeError("events must be a list")
     directory = os.path.dirname(os.path.abspath(EVENTS_FILE))
-    temp_path = os.path.join(directory, f".{os.path.basename(EVENTS_FILE)}.tmp")
-    with open(temp_path, "w", encoding="utf-8") as file:
-        json.dump(events, file, indent=4, ensure_ascii=False)
-        file.flush()
-        os.fsync(file.fileno())
-    os.replace(temp_path, EVENTS_FILE)
+    fd, temp_path = tempfile.mkstemp(prefix=".webhook-events-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            json.dump(events, file, indent=4, ensure_ascii=False)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_path, EVENTS_FILE)
+    finally:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except OSError:
+            pass
 
 
 def sign_payload(raw_body, secret):
@@ -93,12 +111,9 @@ def process_webhook(raw_body, signature, secret=None):
     if order is None:
         return {"ok": False, "status": 404, "error": "order not found"}
 
-    try:
-        event_amount = float(event.get("amount"))
-        order_amount = float(order.get("amount"))
-    except (TypeError, ValueError):
-        return {"ok": False, "status": 400, "error": "invalid amount"}
-    if event_amount != order_amount:
+    event_amount = _money(event.get("amount"))
+    order_amount = _money(order.get("amount"))
+    if event_amount is None or order_amount is None or event_amount != order_amount:
         return {"ok": False, "status": 400, "error": "payment does not match order"}
 
     event_currency = str(event.get("currency", "")).strip().upper()
