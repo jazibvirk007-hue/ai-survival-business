@@ -1,22 +1,20 @@
-"""Bounded V8 CEO orchestration primitives.
-
-The loop observes supplied business state, asks the AI CEO for one bounded
-next action, and optionally executes only explicitly registered safe handlers.
-It does not send outreach, move money, verify payments, or deliver orders by
-itself. Those operations remain behind their existing approval/trust gates.
-"""
+"""Bounded V8 CEO orchestration with explicit governance."""
 
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
-from ai_ceo import AICEO, Decision, ACTIONS
+from ai_ceo import AICEO, ACTIONS
+from cortex_guard import CortexGuard
 
 
 class CEOLoop:
-    """Run one bounded decision cycle against an observed state."""
+    """Run bounded decision cycles and route governed actions through Guard."""
 
-    def __init__(self, minimum_cash: float = 0.0, max_actions_per_cycle: int = 1):
+    def __init__(self, minimum_cash: float = 0.0, max_actions_per_cycle: int = 1, guard=None):
         self.ceo = AICEO(minimum_cash=minimum_cash, max_actions_per_cycle=max_actions_per_cycle)
+        self.guard = guard if guard is not None else CortexGuard()
+        if not isinstance(self.guard, CortexGuard):
+            raise TypeError("guard must be a CortexGuard")
         self.handlers: Dict[str, Callable[[Dict[str, Any]], Any]] = {}
         self.outcomes: List[Dict[str, Any]] = []
 
@@ -27,8 +25,13 @@ class CEOLoop:
             raise TypeError("handler must be callable")
         self.handlers[action] = handler
 
-    def cycle(self, state: Dict[str, Any], execute: bool = False) -> Dict[str, Any]:
-        """Observe, decide, and optionally run one registered safe handler."""
+    def cycle(self, state: Dict[str, Any], execute: bool = False, approval_id: Optional[str] = None) -> Dict[str, Any]:
+        """Observe, decide, and optionally execute one safe handler.
+
+        Approval-required decisions create a Guard request. Execution of such a
+        decision requires the matching, unexpired approval id and consumes it
+        before the handler runs, preventing approval replay.
+        """
         if not isinstance(state, dict):
             raise TypeError("state must be a dictionary")
 
@@ -37,11 +40,32 @@ class CEOLoop:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "decision": decision.to_dict(),
             "executed": False,
+            "approval_id": None,
             "outcome": None,
         }
 
-        if execute and decision.requires_approval:
-            result["outcome"] = "approval_required"
+        if decision.requires_approval:
+            if not execute:
+                request = self.guard.request(decision.action, decision.reason, decision.priority)
+                result["approval_id"] = request["id"]
+                result["outcome"] = "approval_required"
+            elif not approval_id:
+                result["outcome"] = "approval_required"
+            else:
+                try:
+                    approval = self.guard.consume(approval_id, decision.action)
+                    result["approval_id"] = approval["id"]
+                    handler = self.handlers.get(decision.action)
+                    if handler is None:
+                        result["outcome"] = "handler_not_registered"
+                    else:
+                        try:
+                            result["outcome"] = handler(dict(state))
+                            result["executed"] = True
+                        except Exception as error:
+                            result["outcome"] = f"handler_failed: {type(error).__name__}: {error}"
+                except (KeyError, ValueError) as error:
+                    result["outcome"] = f"approval_denied: {error}"
         elif execute:
             handler = self.handlers.get(decision.action)
             if handler is None:
@@ -61,9 +85,10 @@ class CEOLoop:
     def status(self) -> Dict[str, Any]:
         return {
             "engine": "AI CEO loop",
-            "version": "8.0",
+            "version": "8.1",
             "cycles": len(self.outcomes),
             "registered_handlers": sorted(self.handlers),
             "execution_default": False,
             "external_irreversible_actions": "approval_required",
+            "guard": self.guard.status(),
         }
