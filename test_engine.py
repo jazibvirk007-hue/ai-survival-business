@@ -59,6 +59,15 @@ class EngineSmokeTests(unittest.TestCase):
                 self.assertFalse(verify_payment("order-1", "tx-duplicate", confirmed=True))
             finally: os.chdir(original)
 
+    def test_corrupt_payment_ledger_fails_closed(self):
+        from payment_tracker import load_payments
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd(); os.chdir(temp_dir)
+            try:
+                with open("payments.json", "w", encoding="utf-8") as file: file.write("not-json")
+                with self.assertRaises(RuntimeError): load_payments()
+            finally: os.chdir(original)
+
     def test_verified_revenue_deduplicates_corrupt_records(self):
         from payment_tracker import verified_payments, verified_revenue
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -80,6 +89,7 @@ class EngineSmokeTests(unittest.TestCase):
                 with self.assertRaises(ValueError): create_payment_request("order-zero", "0")
                 with self.assertRaises(ValueError): create_payment_request("order-nan", "NaN")
                 with self.assertRaises(ValueError): create_payment_request("order-inf", "Infinity")
+                with self.assertRaises(ValueError): create_payment_request("order-currency", 10, "USDX")
             finally: os.chdir(original)
 
     def test_order_lifecycle_is_payment_gated(self):
@@ -113,6 +123,16 @@ class EngineSmokeTests(unittest.TestCase):
                 self.assertTrue(verify_order_payment("ORD-PATH", "tx-path", confirmed=True))
                 self.assertFalse(mark_delivered("ORD-PATH", "../secret.txt"))
                 self.assertFalse(mark_delivered("ORD-PATH", "/tmp/secret.txt"))
+                self.assertFalse(mark_delivered("ORD-PATH", "exports/secret.txt"))
+            finally: os.chdir(original)
+
+    def test_corrupt_order_ledger_fails_closed(self):
+        from order_engine import load_orders
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd(); os.chdir(temp_dir)
+            try:
+                with open("orders.json", "w", encoding="utf-8") as file: file.write("not-json")
+                with self.assertRaises(RuntimeError): load_orders()
             finally: os.chdir(original)
 
     def test_order_payment_amount_must_match(self):
@@ -183,6 +203,19 @@ class EngineSmokeTests(unittest.TestCase):
                 body = json.dumps({"event_id": "evt-corrupt", "type": "payment.succeeded", "order_id": "ORD-MISSING", "transaction_id": "tx", "amount": 35, "currency": "USD"}).encode()
                 result = process_webhook(body, sign_payload(body, "secret"), "secret")
                 self.assertEqual(result["status"], 503)
+            finally: os.chdir(original)
+
+    def test_webhook_rejects_non_finite_amount(self):
+        from order_engine import create_order
+        from payment_webhook import process_webhook, sign_payload
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd(); os.chdir(temp_dir)
+            try:
+                create_order("ORD-WEBHOOK-3", "Customer", "Cafe", "Kit", 35, "USD")
+                body = json.dumps({"event_id": "evt-3", "type": "payment.succeeded", "order_id": "ORD-WEBHOOK-3", "transaction_id": "tx-web-3", "amount": "NaN", "currency": "USD"}).encode()
+                result = process_webhook(body, sign_payload(body, "secret"), "secret")
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["status"], 400)
             finally: os.chdir(original)
 
     def test_url_normalization(self):
