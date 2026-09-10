@@ -1,13 +1,13 @@
 import unittest
 from unittest.mock import Mock
 
-from ai_provider import AIProvider
+from ai_provider import OpenAICompatibleProvider
 from cortex_chat import CortexCEOChat
 
 
 class TestCortexCEOChat(unittest.TestCase):
     def setUp(self):
-        self.provider = Mock(spec=AIProvider)
+        self.provider = Mock(spec=OpenAICompatibleProvider)
         self.provider.generate.return_value = "Current cash is $0. No verified revenue yet."
         self.chat = CortexCEOChat(self.provider)
 
