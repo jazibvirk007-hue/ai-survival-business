@@ -1,8 +1,21 @@
+"""Payment ledger with explicit verification and safe monetary comparisons."""
+
 import json
 import os
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 PAYMENTS_FILE = "payments.json"
+
+
+def _money(value):
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not amount.is_finite() or amount <= 0:
+        return None
+    return amount.quantize(Decimal("0.01"))
 
 
 def load_payments():
@@ -19,16 +32,21 @@ def load_payments():
 def save_payments(payments):
     if not isinstance(payments, list):
         raise TypeError("payments must be a list")
-    with open(PAYMENTS_FILE, "w", encoding="utf-8") as file:
+    directory = os.path.dirname(os.path.abspath(PAYMENTS_FILE))
+    temp_path = os.path.join(directory, f".{os.path.basename(PAYMENTS_FILE)}.tmp")
+    with open(temp_path, "w", encoding="utf-8") as file:
         json.dump(payments, file, indent=4, ensure_ascii=False)
+        file.flush()
+        os.fsync(file.fileno())
+    os.replace(temp_path, PAYMENTS_FILE)
 
 
 def create_payment_request(order_id, amount, currency="USD"):
     if not order_id:
         raise ValueError("order_id is required")
-    amount = float(amount)
-    if amount <= 0:
-        raise ValueError("payment amount must be greater than zero")
+    amount = _money(amount)
+    if amount is None:
+        raise ValueError("payment amount must be greater than zero and valid")
     currency = str(currency or "USD").strip().upper()
     if not currency:
         raise ValueError("currency is required")
@@ -40,7 +58,7 @@ def create_payment_request(order_id, amount, currency="USD"):
 
     payment = {
         "order_id": str(order_id),
-        "amount": amount,
+        "amount": float(amount),
         "currency": currency,
         "status": "requested",
         "transaction_id": None,
@@ -53,13 +71,7 @@ def create_payment_request(order_id, amount, currency="USD"):
 
 
 def verify_payment(order_id, transaction_id, confirmed=False):
-    """Verify an existing payment only after independent confirmation.
-
-    ``confirmed`` is deliberately explicit so a transaction ID alone can never
-    create revenue. In production this flag must be set by a trusted payment
-    provider/webhook or a controlled human-verification workflow, not by an
-    untrusted customer request.
-    """
+    """Verify an existing payment only after independent confirmation."""
     if not order_id or not transaction_id or not confirmed:
         return False
 
@@ -71,15 +83,12 @@ def verify_payment(order_id, transaction_id, confirmed=False):
     payments = load_payments()
     matches = [payment for payment in payments if payment.get("order_id") == order_id]
     if len(matches) != 1:
-        # Missing or duplicated order records are unsafe to verify automatically.
         return False
 
     payment = matches[0]
     if payment.get("status") == "verified":
-        # Idempotent only for the exact same transaction.
         return payment.get("transaction_id") == transaction_id
 
-    # A verified transaction reference may never be reused for another order.
     for other in payments:
         if (
             other.get("order_id") != order_id
@@ -88,11 +97,8 @@ def verify_payment(order_id, transaction_id, confirmed=False):
         ):
             return False
 
-    try:
-        amount = float(payment.get("amount", 0))
-    except (TypeError, ValueError):
-        return False
-    if amount <= 0:
+    amount = _money(payment.get("amount"))
+    if amount is None:
         return False
 
     payment["status"] = "verified"
@@ -107,7 +113,7 @@ def get_payment(order_id):
 
 
 def verified_revenue():
-    total = 0.0
+    total = Decimal("0.00")
     seen_orders = set()
     for payment in load_payments():
         if payment.get("status") != "verified":
@@ -115,14 +121,11 @@ def verified_revenue():
         order_id = payment.get("order_id")
         if order_id in seen_orders:
             continue
-        try:
-            amount = float(payment.get("amount", 0))
-        except (TypeError, ValueError):
-            continue
-        if amount > 0:
+        amount = _money(payment.get("amount"))
+        if amount is not None:
             total += amount
             seen_orders.add(order_id)
-    return total
+    return float(total)
 
 
 def pending_payments():
