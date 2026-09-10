@@ -1,8 +1,8 @@
 """Order lifecycle for real, payment-gated digital delivery.
 
-This module deliberately keeps payment verification separate from customer input.
-An order becomes paid only after payment_tracker.verify_payment() accepts an
-independently confirmed transaction. Delivery is blocked until that state exists.
+Payment verification remains separate from customer input. An order becomes paid
+only after payment_tracker.verify_payment() accepts an independently confirmed
+transaction, and delivery is blocked until that state exists.
 """
 
 import json
@@ -51,11 +51,18 @@ def get_order(order_id):
 
 
 def create_order(order_id, customer, business_name, product_name, amount, currency="USD"):
-    """Create one payment-pending order and its matching payment request."""
+    """Create one payment-pending order and its matching payment request.
+
+    The order write is rolled back if payment-request creation fails, preventing
+    an order from being left in a payment-pending state without a payment record.
+    """
     order_id = str(order_id or "").strip()
     if not order_id:
         raise ValueError("order_id is required")
-    amount = float(amount)
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        raise ValueError("order amount must be a valid number") from None
     if amount <= 0:
         raise ValueError("order amount must be greater than zero")
     currency = str(currency or "USD").strip().upper()
@@ -82,9 +89,15 @@ def create_order(order_id, customer, business_name, product_name, amount, curren
         "delivered_at": None,
         "delivery_file": None,
     }
+
     orders.append(order)
     save_orders(orders)
-    create_payment_request(order_id, amount, currency)
+    try:
+        create_payment_request(order_id, amount, currency)
+    except Exception:
+        rollback = [item for item in load_orders() if item.get("order_id") != order_id]
+        save_orders(rollback)
+        raise
     return order
 
 
@@ -102,17 +115,13 @@ def _save_updated_order(updated):
 
 
 def verify_order_payment(order_id, transaction_id, confirmed=False):
-    """Verify payment and atomically move the order into the paid state.
+    """Verify payment and move the order into the paid state.
 
-    The provider/human confirmation is represented by ``confirmed=True`` only
-    after independent verification. This function also requires the payment
-    amount and currency to exactly match the order before changing order state.
+    ``confirmed=True`` is valid only for independently verified provider/webhook
+    data or a controlled human workflow. Order amount and currency must match.
     """
     order = get_order(order_id)
-    if order is None:
-        return False
-
-    if order.get("status") == "delivered":
+    if order is None or order.get("status") == "delivered":
         return False
 
     payment = get_payment(order_id)
@@ -161,16 +170,8 @@ def mark_delivered(order_id, delivery_file):
 
 
 def pending_orders():
-    return [
-        order
-        for order in load_orders()
-        if order.get("status") == "payment_pending"
-    ]
+    return [order for order in load_orders() if order.get("status") == "payment_pending"]
 
 
 def paid_orders():
-    return [
-        order
-        for order in load_orders()
-        if order.get("payment_status") == "paid"
-    ]
+    return [order for order in load_orders() if order.get("payment_status") == "paid"]
