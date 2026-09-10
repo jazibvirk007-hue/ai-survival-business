@@ -66,7 +66,9 @@ class AICEO:
         approved = max(0, int(self._number(state, "approved_outreach")))
         pending = max(0, int(self._number(state, "pending_orders")))
         products = max(0, int(self._number(state, "products_available")))
-        market_age = max(0.0, self._number(state, "market_research_age_hours", 9999))
+        # A researched market is considered fresh unless an explicit age is supplied.
+        market_age_default = 0 if state.get("market_researched", False) else 9999
+        market_age = max(0.0, self._number(state, "market_research_age_hours", market_age_default))
         recent_failure = bool(state.get("recent_action_failed", False))
 
         candidates: List[Decision] = []
@@ -88,11 +90,11 @@ class AICEO:
         if drafts > 0 and approved == 0:
             candidates.append(Decision("draft_outreach", 76, "Qualified prospects exist without an approved outreach draft.", "Prepare personalized outreach for human/provider-approved sending."))
 
+        if pending > 0:
+            candidates.append(Decision("review_financials", 75, "There are pending orders that must remain payment-gated.", "Check verified payment state without counting unpaid orders as revenue."))
+
         if approved > 0 and pending == 0:
             candidates.append(Decision("follow_up", 72, "Approved outreach exists but no resulting order is pending.", "Follow up through permitted channels and seek a real customer response.", True))
-
-        if pending > 0:
-            candidates.append(Decision("review_financials", 70, "There are pending orders that must remain payment-gated.", "Check verified payment state without counting unpaid orders as revenue."))
 
         if revenue > 0 and not candidates:
             candidates.append(Decision("improve_offer", 55, "Revenue exists and no urgent operational blocker is visible.", "Use observed results to improve conversion or customer value."))
