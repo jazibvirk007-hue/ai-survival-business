@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import importlib
 import json
 import os
@@ -72,6 +70,18 @@ class EngineSmokeTests(unittest.TestCase):
                 self.assertEqual(len(verified_payments()), 2)
             finally: os.chdir(original)
 
+    def test_monetary_precision_and_invalid_values(self):
+        from payment_tracker import create_payment_request, verified_revenue
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd(); os.chdir(temp_dir)
+            try:
+                create_payment_request("order-precise", "0.10")
+                self.assertAlmostEqual(verified_revenue(), 0.0)
+                with self.assertRaises(ValueError): create_payment_request("order-zero", "0")
+                with self.assertRaises(ValueError): create_payment_request("order-nan", "NaN")
+                with self.assertRaises(ValueError): create_payment_request("order-inf", "Infinity")
+            finally: os.chdir(original)
+
     def test_order_lifecycle_is_payment_gated(self):
         from order_engine import create_order, get_order, mark_delivered, verify_order_payment
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -94,6 +104,17 @@ class EngineSmokeTests(unittest.TestCase):
                 self.assertEqual(delivered["delivery_status"], "delivered")
             finally: os.chdir(original)
 
+    def test_delivery_path_traversal_is_rejected(self):
+        from order_engine import create_order, mark_delivered, verify_order_payment
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd(); os.chdir(temp_dir)
+            try:
+                create_order("ORD-PATH", "Customer", "Cafe", "Kit", 35)
+                self.assertTrue(verify_order_payment("ORD-PATH", "tx-path", confirmed=True))
+                self.assertFalse(mark_delivered("ORD-PATH", "../secret.txt"))
+                self.assertFalse(mark_delivered("ORD-PATH", "/tmp/secret.txt"))
+            finally: os.chdir(original)
+
     def test_order_payment_amount_must_match(self):
         from order_engine import create_order, get_order, verify_order_payment
         from payment_tracker import load_payments, save_payments
@@ -112,8 +133,7 @@ class EngineSmokeTests(unittest.TestCase):
             original = os.getcwd(); os.chdir(temp_dir)
             try:
                 with mock.patch.object(order_engine, "create_payment_request", side_effect=RuntimeError("gateway unavailable")):
-                    with self.assertRaises(RuntimeError):
-                        order_engine.create_order("ORD-ROLLBACK", "Customer", "Cafe", "Kit", 25)
+                    with self.assertRaises(RuntimeError): order_engine.create_order("ORD-ROLLBACK", "Customer", "Cafe", "Kit", 25)
                 self.assertIsNone(order_engine.get_order("ORD-ROLLBACK"))
                 self.assertEqual(order_engine.load_orders(), [])
             finally: os.chdir(original)
@@ -152,6 +172,17 @@ class EngineSmokeTests(unittest.TestCase):
                 self.assertFalse(result["ok"])
                 self.assertEqual(result["status"], 400)
                 self.assertEqual(get_order("ORD-WEBHOOK-2")["payment_status"], "unpaid")
+            finally: os.chdir(original)
+
+    def test_corrupt_webhook_event_store_fails_closed(self):
+        from payment_webhook import process_webhook, sign_payload
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = os.getcwd(); os.chdir(temp_dir)
+            try:
+                with open("webhook_events.json", "w", encoding="utf-8") as file: file.write("not-json")
+                body = json.dumps({"event_id": "evt-corrupt", "type": "payment.succeeded", "order_id": "ORD-MISSING", "transaction_id": "tx", "amount": 35, "currency": "USD"}).encode()
+                result = process_webhook(body, sign_payload(body, "secret"), "secret")
+                self.assertEqual(result["status"], 503)
             finally: os.chdir(original)
 
     def test_url_normalization(self):
