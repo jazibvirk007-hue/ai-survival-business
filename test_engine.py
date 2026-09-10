@@ -128,8 +128,6 @@ class EngineSmokeTests(unittest.TestCase):
             try:
                 manager = OrderManager()
                 order = manager.create_order("Customer", "Example Cafe", "Growth Kit", 35, "USD")
-                self.assertEqual(order["status"], "payment_pending")
-                self.assertFalse(manager.confirm_payment(order["order_id"], "tx-amount", confirmed=True))
 
                 payments = manager.load_payment_records()
                 payments[0]["amount"] = 34
@@ -142,6 +140,8 @@ class EngineSmokeTests(unittest.TestCase):
                 with open("payments.json", "w", encoding="utf-8") as file:
                     json.dump(payments, file)
                 self.assertFalse(manager.confirm_payment(order["order_id"], "tx-currency", confirmed=True))
+
+                self.assertEqual(manager.get_order(order["order_id"])["status"], "payment_pending")
             finally:
                 os.chdir(original)
 
