@@ -1,42 +1,25 @@
-"""
-AI SURVIVAL BUSINESS
-VERSION 7
+"""AI SURVIVAL BUSINESS - VERSION 7.2
 
-Real business engine:
-- $0 starting capital
-- Real market research
-- Real prospect discovery
-- Real sales pipeline
-- Real payment verification
-- Real order management
-- Payment-gated delivery
-- No fake revenue
-- No fake customers
-- No automatic spam
+Real-business engine with zero starting capital.
+No fake sales, fake payments, fake customers, or automatic spam.
 """
 
-import os
 import json
+import os
+import re
 import uuid
 from datetime import datetime
 
-from market_research import MarketResearch
-from sales_engine import SalesEngine
-from payment_tracker import verified_revenue
-
 from business import Business
+from market_research import MarketResearch
 from memory import add_memory
-
+from outreach import OutreachGenerator
+from payment_tracker import verified_payments, verified_revenue
 from product_factory import ProductFactory
 from prospect_research import ProspectResearcher
 from prospect_scoring import ProspectScorer
+from sales_engine import SalesEngine
 from website_research import WebsiteResearcher
-from outreach import OutreachGenerator
-
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
 
 OPPORTUNITIES = [
     "short video script service",
@@ -46,739 +29,229 @@ OPPORTUNITIES = [
     "AI automation service",
     "YouTube script writing service",
     "product description writing service",
-    "presentation design service"
+    "presentation design service",
 ]
 
 ORDERS_FILE = "orders.json"
 DELIVERY_DIR = "deliveries"
 
 
-# ============================================================
-# DISPLAY
-# ============================================================
-
 def header():
-
-    print()
-    print("=" * 70)
+    print("\n" + "=" * 70)
     print("             AI SURVIVAL BUSINESS")
-    print("             VERSION 7.1")
+    print("             VERSION 7.2")
     print("=" * 70)
-
-    print()
-    print("Starting capital: $0.00")
+    print("\nStarting capital: $0.00")
     print("Fake sales: DISABLED")
     print("Fake payments: DISABLED")
     print("Revenue simulation: DISABLED")
-    print("Automatic spam: DISABLED")
-    print()
+    print("Automatic spam: DISABLED\n")
 
-
-# ============================================================
-# MARKET RESEARCH
-# ============================================================
 
 def run_market_research():
-
     print("=" * 70)
     print("1. AI MARKET RESEARCH")
     print("=" * 70)
-
-    researcher = MarketResearch()
-
-    print()
-
     try:
-
-        results = researcher.research_opportunities(
-            OPPORTUNITIES
-        )
-
+        researcher = MarketResearch()
+        results = researcher.research_opportunities(OPPORTUNITIES)
+        ranked = researcher.rank(results or [])
     except Exception as error:
-
-        print()
-        print(
-            f"❌ Market research failed: {error}"
-        )
-
+        print(f"❌ Market research failed: {type(error).__name__}: {error}")
         return None
-
-    if not results:
-
-        print()
-        print(
-            "❌ Market research returned no results."
-        )
-
-        print(
-            "The AI will NOT invent an opportunity."
-        )
-
-        return None
-
-    ranked = researcher.rank(
-        results
-    )
 
     if not ranked:
-
-        print()
-        print(
-            "❌ Ranking returned no opportunities."
-        )
-
+        print("❌ No research results. The AI will not invent an opportunity.")
         return None
 
-    print()
-
-    for index, result in enumerate(
-        ranked,
-        start=1
-    ):
-
-        print(
-            f"{index}. "
-            f"{result['opportunity']}"
-        )
-
-        print(
-            f"   Articles:      "
-            f"{result['articles']}"
-        )
-
-        print(
-            f"   Demand:        "
-            f"{result['demand']}%"
-        )
-
-        print(
-            f"   Commercial:    "
-            f"{result['commercial']}%"
-        )
-
-        print(
-            f"   Competition:   "
-            f"{result['competition']}%"
-        )
-
-        print(
-            f"   Trend:         "
-            f"{result['trend']}%"
-        )
-
-        print(
-            f"   AI Score:      "
-            f"{result['score']}/100"
-        )
-
-        print()
+    for index, result in enumerate(ranked, 1):
+        print(f"{index}. {result.get('opportunity', 'Unknown')}")
+        print(f"   Articles: {result.get('articles', 0)}")
+        print(f"   Demand: {result.get('demand', 0)}%")
+        print(f"   Commercial: {result.get('commercial', 0)}%")
+        print(f"   Competition: {result.get('competition', 0)}%")
+        print(f"   Trend: {result.get('trend', 0)}%")
+        print(f"   AI Score: {result.get('score', 0)}/100\n")
 
     selected = ranked[0]
-
     print("=" * 70)
     print("🧠 AI DECISION")
     print("=" * 70)
-
-    print()
-    print(
-        "Selected opportunity:"
-    )
-
-    print(
-        f"👉 {selected['opportunity']}"
-    )
-
-    print(
-        f"Opportunity score: "
-        f"{selected['score']}/100"
-    )
-
-    print()
-
+    print(f"Selected opportunity: 👉 {selected.get('opportunity')}")
+    print(f"Opportunity score: {selected.get('score', 0)}/100\n")
     return selected
 
 
-# ============================================================
-# PRODUCT FACTORY
-# ============================================================
-
-def run_product_factory(
-    selected
-):
-
+def run_product_factory(selected):
     print("=" * 70)
     print("2. AI PRODUCT FACTORY")
     print("=" * 70)
-
-    factory = ProductFactory()
-
     try:
-
-        product = factory.build_product(
-            selected["opportunity"],
-            selected
-        )
-
+        factory = ProductFactory()
+        product = factory.build_product(selected["opportunity"], selected)
+        path = factory.save_product(product)
     except Exception as error:
-
-        print(
-            f"❌ Product factory failed: "
-            f"{type(error).__name__}: {error}"
-        )
-
+        print(f"❌ Product factory failed: {type(error).__name__}: {error}")
         return None
 
-    if not product:
-
-        print(
-            "❌ No product was created."
-        )
-
-        return None
-
-    print()
-
-    if isinstance(
-        product,
-        dict
-    ):
-
-        print(
-            "Product:",
-            product.get(
-                "product_name",
-                product.get(
-                    "name",
-                    "Unknown"
-                )
-            )
-        )
-
-        print(
-            "Target:",
-            product.get(
-                "target_customer",
-                product.get(
-                    "customer",
-                    "Unknown"
-                )
-            )
-        )
-
-        print(
-            "Price: $",
-            product.get(
-                "starter_price",
-                product.get(
-                    "price",
-                    0
-                )
-            )
-        )
-
-        print(
-            "Cost: $",
-            product.get(
-                "creation_cost",
-                product.get(
-                    "cost",
-                    0
-                )
-            )
-        )
-
-    else:
-
-        print(
-            product
-        )
-
+    print(f"Product: {product.get('product_name', 'Unknown')}")
+    print(f"Target: {product.get('target_customer', 'Unknown')}")
+    print(f"Price: ${float(product.get('starter_price', 0)):.2f}")
+    print(f"Cost: ${float(product.get('estimated_cost', 0)):.2f}")
+    print(f"Saved: {path}\n")
     return product
 
 
-# ============================================================
-# PROSPECT DISCOVERY
-# ============================================================
-
-def run_prospect_discovery(
-    city
-):
-
-    print()
+def run_prospect_discovery(city):
     print("=" * 70)
     print("3. CUSTOMER ACQUISITION")
     print("=" * 70)
-
-    researcher = ProspectResearcher()
-
     try:
-
-        prospects = researcher.find_businesses(
-            city,
-            limit=30
-        )
-
-    except TypeError:
-
-        try:
-
-            prospects = researcher.find_businesses(
-                city
-            )
-
-        except Exception as error:
-
-            print(
-                f"❌ Prospect search failed: {error}"
-            )
-
-            return []
-
+        prospects = ProspectResearcher().find_businesses(city, limit=30)
     except Exception as error:
-
-        print(
-            f"❌ Prospect search failed: {error}"
-        )
-
+        print(f"❌ Prospect search failed: {type(error).__name__}: {error}")
         return []
-
-    if not prospects:
-
-        print()
-        print(
-            "No prospects found."
-        )
-
-        return []
-
-    print()
-    print(
-        f"Raw prospects found: "
-        f"{len(prospects)}"
-    )
-
+    print(f"Raw prospects found: {len(prospects)}")
     return prospects
 
 
-# ============================================================
-# WEBSITE RESEARCH
-# ============================================================
-
-def research_website(
-    prospect
-):
-
-    website = prospect.get(
-        "website"
-    )
-
-    if not website:
-
-        return {}
-
-    researcher = WebsiteResearcher()
-
+def research_website(prospect):
     try:
-
-        result = researcher.research(
-            website
-        )
-
-    except Exception:
-
-        return {}
-
-    if isinstance(
-        result,
-        dict
-    ):
-
-        return result
-
-    return {}
+        return WebsiteResearcher().research(prospect)
+    except Exception as error:
+        return {
+            "success": False,
+            "website": prospect.get("website", ""),
+            "title": "",
+            "text_length": 0,
+            "signals": {},
+            "reason": f"{type(error).__name__}: {error}",
+        }
 
 
-# ============================================================
-# PROSPECT SCORING
-# ============================================================
-
-def qualify_prospects(
-    prospects
-):
-
-    print()
-    print("=" * 70)
+def qualify_prospects(prospects):
+    print("\n" + "=" * 70)
     print("4. PROSPECT QUALIFICATION")
     print("=" * 70)
 
     scorer = ProspectScorer()
-
     qualified = []
+    total = len(prospects)
 
-    for prospect in prospects:
-
-        website_data = research_website(
-            prospect
-        )
-
-        try:
-
-            result = scorer.score(
-                prospect,
-                website_data
-            )
-
-        except TypeError:
-
-            try:
-
-                result = scorer.score(
-                    prospect
-                )
-
-            except Exception:
-
-                result = prospect
-
-        except Exception:
-
-            result = prospect
-
-        if not isinstance(
-            result,
-            dict
-        ):
-
-            result = prospect.copy()
-
-        # Preserve website research.
-
-        result["_website_research"] = (
-            website_data
-        )
-
-        score = (
-            result.get("score")
-            or result.get(
-                "prospect_score"
-            )
-            or 0
-        )
+    for index, prospect in enumerate(prospects, 1):
+        name = prospect.get("name", "Unknown")
+        print(f"[{index}/{total}] Analyzing: {name}")
+        website_data = research_website(prospect)
 
         try:
+            score_data = scorer.score(prospect, website_data)
+        except Exception as error:
+            print(f"   ⚠ Scoring error: {type(error).__name__}: {error}")
+            score_data = {"score": 0, "priority": "LOW", "reasons": ["Scoring failed."]}
 
-            score = float(
-                score
-            )
-
-        except Exception:
-
-            score = 0
-
+        # Keep the original prospect fields. The scorer returns metadata only.
+        result = dict(prospect)
+        result.update(score_data if isinstance(score_data, dict) else {})
+        result["_website_research"] = website_data
+        try:
+            score = float(result.get("score", result.get("prospect_score", 0)) or 0)
+        except (TypeError, ValueError):
+            score = 0.0
         result["_final_score"] = score
 
+        print(f"   Score: {score:.0f}/100 | Priority: {result.get('priority', 'LOW')}")
+        if website_data.get("reason"):
+            print(f"   Website: {website_data['reason']}")
         if score >= 50:
+            qualified.append(result)
 
-            qualified.append(
-                result
-            )
-
-    qualified.sort(
-        key=lambda x:
-            x.get(
-                "_final_score",
-                0
-            ),
-        reverse=True
-    )
-
-    print()
-
-    print(
-        f"Qualified prospects: "
-        f"{len(qualified)}"
-    )
-
-    print()
-
-    for index, prospect in enumerate(
-        qualified[:20],
-        start=1
-    ):
-
-        print(
-            f"{index}. "
-            f"{prospect.get('name', 'Unknown')} "
-            f"— "
-            f"{prospect.get('_final_score', 0):.0f}"
-        )
-
+    qualified.sort(key=lambda item: item.get("_final_score", 0), reverse=True)
+    print(f"\nQualified prospects: {len(qualified)}")
+    for index, prospect in enumerate(qualified[:20], 1):
+        print(f"{index}. {prospect.get('name', 'Unknown')} — {prospect.get('_final_score', 0):.0f}")
     return qualified
 
 
-# ============================================================
-# OUTREACH
-# ============================================================
-
-def create_outreach(
-    prospect,
-    product
-):
-
-    print()
-    print("=" * 70)
+def create_outreach(prospect, product):
+    print("\n" + "=" * 70)
     print("5. OUTREACH DRAFT")
     print("=" * 70)
-
-    generator = OutreachGenerator()
-
-    website_data = prospect.get(
-        "_website_research",
-        {}
-    )
-
     try:
-
-        draft = generator.generate(
-            prospect,
-            product,
-            website_data
+        draft = OutreachGenerator().generate(
+            prospect, product, prospect.get("_website_research", {})
         )
-
-    except TypeError:
-
-        try:
-
-            draft = generator.generate(
-                prospect,
-                product
-            )
-
-        except Exception:
-
-            draft = None
-
-    except Exception:
-
-        draft = None
-
-    if not draft:
-
-        print(
-            "⚠️ Could not generate outreach."
-        )
-
+    except Exception as error:
+        print(f"❌ Outreach generation failed: {type(error).__name__}: {error}")
         return None
 
-    print()
-
-    if isinstance(
-        draft,
-        dict
-    ):
-
-        print(
-            draft.get(
-                "message",
-                draft.get(
-                    "draft",
-                    str(draft)
-                )
-            )
-        )
-
-    else:
-
-        print(
-            draft
-        )
-
-    print()
-
-    print(
-        "⚠️ This message has NOT been sent."
-    )
-
+    message = draft.get("message", str(draft)) if isinstance(draft, dict) else str(draft)
+    print("\n" + message)
+    print("\n⚠️ This message has NOT been sent.")
     return draft
 
 
-# ============================================================
-# ORDER STORAGE
-# ============================================================
-
 def load_orders():
-
-    if not os.path.exists(
-        ORDERS_FILE
-    ):
-
+    if not os.path.exists(ORDERS_FILE):
         return []
-
     try:
-
-        with open(
-            ORDERS_FILE,
-            "r",
-            encoding="utf-8"
-        ) as file:
-
-            return json.load(
-                file
-            )
-
-    except Exception:
-
+        with open(ORDERS_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError, TypeError):
         return []
 
 
-def save_orders(
-    orders
-):
-
-    with open(
-        ORDERS_FILE,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            orders,
-            file,
-            indent=4,
-            ensure_ascii=False
-        )
+def save_orders(orders):
+    with open(ORDERS_FILE, "w", encoding="utf-8") as file:
+        json.dump(orders, file, indent=4, ensure_ascii=False)
 
 
-# ============================================================
-# REAL ORDER
-# ============================================================
-
-def create_real_order(
-    customer,
-    business_name,
-    product_name,
-    amount
-):
-
-    orders = load_orders()
-
+def create_real_order(customer, business_name, product_name, amount):
+    amount = float(amount)
+    if amount <= 0:
+        raise ValueError("order amount must be greater than zero")
     order = {
-
-        "order_id":
-            "ORD-" +
-            uuid.uuid4().hex[:10].upper(),
-
-        "customer":
-            customer,
-
-        "business_name":
-            business_name,
-
-        "product":
-            product_name,
-
-        "amount":
-            float(amount),
-
-        "currency":
-            "USD",
-
-        "status":
-            "payment_pending",
-
-        "payment_status":
-            "unpaid",
-
-        "delivery_status":
-            "not_started",
-
-        "created_at":
-            datetime.now().isoformat(),
-
-        "paid_at":
-            None,
-
-        "delivered_at":
-            None,
-
-        "delivery_file":
-            None
+        "order_id": "ORD-" + uuid.uuid4().hex[:10].upper(),
+        "customer": customer,
+        "business_name": business_name,
+        "product": product_name,
+        "amount": amount,
+        "currency": "USD",
+        "status": "payment_pending",
+        "payment_status": "unpaid",
+        "delivery_status": "not_started",
+        "created_at": datetime.now().isoformat(),
+        "paid_at": None,
+        "delivered_at": None,
+        "delivery_file": None,
     }
-
-    orders.append(
-        order
-    )
-
-    save_orders(
-        orders
-    )
-
+    orders = load_orders()
+    orders.append(order)
+    save_orders(orders)
     return order
 
 
-# ============================================================
-# DELIVERY
-# ============================================================
+def _safe_filename(value):
+    value = re.sub(r"[^a-zA-Z0-9._-]+", "_", str(value)).strip("._")
+    return value[:80] or "customer"
 
-def deliver_paid_order(
-    order
-):
 
-    if order.get(
-        "payment_status"
-    ) != "paid":
-
-        print(
-            "❌ Delivery blocked."
-        )
-
-        print(
-            "Payment has not been verified."
-        )
-
+def deliver_paid_order(order):
+    if order.get("payment_status") != "paid":
+        print("❌ Delivery blocked: payment has not been independently verified.")
         return None
 
-    os.makedirs(
-        DELIVERY_DIR,
-        exist_ok=True
-    )
+    os.makedirs(DELIVERY_DIR, exist_ok=True)
+    filename = f"{order['order_id']}_{_safe_filename(order.get('business_name'))}_growth_kit.txt"
+    filepath = os.path.join(DELIVERY_DIR, filename)
+    content = f"""LOCAL BUSINESS GROWTH KIT
 
-    safe_name = (
-        order["business_name"]
-        .lower()
-        .replace(" ", "_")
-        .replace("/", "_")
-    )
-
-    filename = (
-        f'{order["order_id"]}_'
-        f'{safe_name}_growth_kit.txt'
-    )
-
-    filepath = os.path.join(
-        DELIVERY_DIR,
-        filename
-    )
-
-    content = f"""
-LOCAL BUSINESS GROWTH KIT
-
-Customer:
-{order["customer"]}
-
-Business:
-{order["business_name"]}
-
-Product:
-{order["product"]}
-
-Generated:
-{datetime.now().isoformat()}
-
-========================================
+Customer: {order.get('customer', '')}
+Business: {order.get('business_name', '')}
+Product: {order.get('product', '')}
+Generated: {datetime.now().isoformat()}
 
 SOCIAL MEDIA POST IDEAS
-
 1. Introduce your business
 2. Showcase a popular product
 3. Behind-the-scenes content
@@ -792,470 +265,155 @@ SOCIAL MEDIA POST IDEAS
 11. Customer testimonial
 12. Special offer
 
-
 PROMOTIONAL OFFERS
-
 1. New Customer Special
 2. Bring a Friend Promotion
 3. Limited-Time Local Special
 4. Returning Customer Reward
 
-
 SHORT VIDEO IDEAS
-
 1. 15-second business tour
 2. Showcase your best product
 3. Behind-the-scenes preparation
 4. Answer a common customer question
 
-
 CALL TO ACTIONS
-
 Visit us today.
 Message us for details.
 Book your visit.
 Try it this week.
 Share this with a friend.
-
-========================================
 """
-
-    with open(
-        filepath,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        file.write(
-            content.strip()
-        )
-
+    with open(filepath, "w", encoding="utf-8") as file:
+        file.write(content.strip())
     return filepath
 
 
-# ============================================================
-# MAIN
-# ============================================================
-
 def main():
-
     header()
-
     business = Business()
 
-    # --------------------------------------------------------
-    # MARKET
-    # --------------------------------------------------------
-
     selected = run_market_research()
-
     if not selected:
-
-        print()
-        print(
-            "❌ V7 stopped safely."
-        )
-
         return
 
-    # --------------------------------------------------------
-    # PRODUCT
-    # --------------------------------------------------------
-
-    product = run_product_factory(
-        selected
-    )
-
+    product = run_product_factory(selected)
     if not product:
-
-        print()
-        print(
-            "❌ V7 stopped because no product exists."
-        )
-
         return
 
-    # --------------------------------------------------------
-    # CITY
-    # --------------------------------------------------------
-
-    print()
-
-    city = input(
-        "Enter target city: "
-    ).strip()
-
+    city = input("Enter target city: ").strip()
     if not city:
-
-        print(
-            "❌ City cannot be empty."
-        )
-
+        print("❌ City cannot be empty.")
         return
 
-    # --------------------------------------------------------
-    # PROSPECTS
-    # --------------------------------------------------------
-
-    prospects = run_prospect_discovery(
-        city
-    )
-
+    prospects = run_prospect_discovery(city)
     if not prospects:
-
-        print()
-        print(
-            "No real prospects found."
-        )
-
-        print(
-            "Revenue remains $0.00."
-        )
-
+        print("No real prospects found. Revenue remains $0.00.")
         return
 
-    # --------------------------------------------------------
-    # QUALIFICATION
-    # --------------------------------------------------------
-
-    qualified = qualify_prospects(
-        prospects
-    )
-
+    qualified = qualify_prospects(prospects)
     if not qualified:
-
-        print()
-        print(
-            "No qualified prospects."
-        )
-
+        print("No qualified prospects. Revenue remains $0.00.")
         return
 
-    # --------------------------------------------------------
-    # SALES ENGINE
-    # --------------------------------------------------------
-
-    print()
-    print("=" * 70)
+    print("\n" + "=" * 70)
     print("6. SALES PIPELINE")
     print("=" * 70)
-
     sales = SalesEngine()
-
     added = 0
-
     for prospect in qualified:
-
         try:
-
-            if sales.add_prospect(
-                prospect,
-                product
-            ):
-
+            if sales.add_prospect(prospect, product):
                 added += 1
-
         except Exception as error:
-
-            print(
-                f"⚠️ Pipeline error: {error}"
-            )
-
-    print()
-
-    print(
-        f"Added {added} prospects."
-    )
-
-    # --------------------------------------------------------
-    # BEST PROSPECT
-    # --------------------------------------------------------
+            print(f"⚠️ Pipeline error for {prospect.get('name')}: {error}")
+    print(f"Added {added} new prospects.")
 
     best = qualified[0]
-
-    print()
-    print("=" * 70)
+    print("\n" + "=" * 70)
     print("7. BEST SALES OPPORTUNITY")
     print("=" * 70)
+    print(f"Business: {best.get('name', 'Unknown')}")
+    print(f"Category: {best.get('category', 'Unknown')}")
+    print(f"Score: {best.get('_final_score', 0):.0f}/100")
+    print(f"Website: {best.get('website') or 'Not available'}")
 
-    print()
-
-    print(
-        "Business:",
-        best.get(
-            "name",
-            "Unknown"
-        )
-    )
-
-    print(
-        "Category:",
-        best.get(
-            "category",
-            "Unknown"
-        )
-    )
-
-    print(
-        "Score:",
-        best.get(
-            "_final_score",
-            0
-        )
-    )
-
-    print(
-        "Website:",
-        best.get(
-            "website",
-            "Not available"
-        )
-    )
-
-    # --------------------------------------------------------
-    # OUTREACH
-    # --------------------------------------------------------
-
-    draft = create_outreach(
-        best,
-        product
-    )
-
+    draft = create_outreach(best, product)
     if draft:
-
-        print()
-
-        approval = input(
-            "Approve this outreach? (yes/no): "
-        ).strip().lower()
-
+        approval = input("Approve this outreach? (yes/no): ").strip().lower()
         if approval == "yes":
-
-            sales.update_status(
-                best.get("name"),
-                "approved"
-            )
-
-            print()
-            print(
-                "✅ Outreach approved."
-            )
-
-            print(
-                "⚠️ It has NOT been automatically sent."
-            )
-
+            sales.update_status(best.get("name"), "approved")
+            print("✅ Outreach approved for manual sending; it was NOT sent automatically.")
         else:
-
-            sales.update_status(
-                best.get("name"),
-                "draft_created"
-            )
-
-            print(
-                "Outreach rejected."
-            )
-
-    # --------------------------------------------------------
-    # REAL REVENUE
-    # --------------------------------------------------------
-
-    print()
-    print("=" * 70)
-    print("8. REAL PAYMENT STATUS")
-    print("=" * 70)
+            sales.update_status(best.get("name"), "draft_created")
+            print("Outreach left as draft.")
 
     revenue = verified_revenue()
+    payments = verified_payments()
+    business.sync_verified_financials(revenue, len(payments))
 
-    print()
-
-    print(
-        f"Verified revenue: ${revenue:.2f}"
-    )
-
-    print(
-        "No payment has been invented."
-    )
-
-    # --------------------------------------------------------
-    # ORDER SYSTEM
-    # --------------------------------------------------------
-
-    print()
+    print("\n" + "=" * 70)
+    print("8. REAL PAYMENT STATUS")
     print("=" * 70)
+    print(f"Verified payments: {len(payments)}")
+    print(f"Verified revenue: ${revenue:.2f}")
+    print("No payment has been invented.")
+
+    print("\n" + "=" * 70)
     print("9. ORDER + DELIVERY SYSTEM")
     print("=" * 70)
-
-    print()
-
-    print(
-        "Order management: READY"
-    )
-
-    print(
-        "Payment verification: READY"
-    )
-
-    print(
-        "Delivery generation: READY"
-    )
-
-    print(
-        "Payment-gated delivery: ENABLED"
-    )
-
-    print()
-
-    print(
-        "No test order created."
-    )
-
-    print(
-        "Real order requires a real customer."
-    )
-
-    # --------------------------------------------------------
-    # MEMORY
-    # --------------------------------------------------------
+    print("Order management: READY")
+    print("Payment verification: READY")
+    print("Delivery generation: READY")
+    print("Payment-gated delivery: ENABLED")
+    print("No test order created.")
 
     try:
-
-        add_memory(
-            {
-                "event": "v7_run",
-
-                "city": city,
-
-                "opportunity":
-                    selected[
-                        "opportunity"
-                    ],
-
-                "opportunity_score":
-                    selected[
-                        "score"
-                    ],
-
-                "qualified_prospects":
-                    len(
-                        qualified
-                    ),
-
-                "verified_revenue":
-                    revenue,
-
-                "timestamp":
-                    datetime.now().isoformat()
-            }
-        )
-
-        print()
-        print(
-            "🧠 AI memory updated."
-        )
-
+        add_memory({
+            "event": "business_run",
+            "version": "7.2",
+            "city": city,
+            "opportunity": selected.get("opportunity"),
+            "opportunity_score": selected.get("score", 0),
+            "prospects_found": len(prospects),
+            "qualified_prospects": len(qualified),
+            "verified_payments": len(payments),
+            "verified_revenue": revenue,
+            "timestamp": datetime.now().isoformat(),
+        })
+        print("🧠 AI memory updated.")
     except Exception as error:
+        print(f"⚠️ Memory update failed: {error}")
 
-        print(
-            f"⚠️ Memory update failed: {error}"
-        )
-
-    # --------------------------------------------------------
-    # BUSINESS STATUS
-    # --------------------------------------------------------
-
-    print()
-    print("=" * 70)
+    print("\n" + "=" * 70)
     print("10. BUSINESS STATUS")
     print("=" * 70)
-
     business.status()
 
-    # --------------------------------------------------------
-    # PIPELINE
-    # --------------------------------------------------------
-
     pipeline = sales.get_pipeline()
-
-    print()
-    print("=" * 70)
+    print("\n" + "=" * 70)
     print("11. SALES PIPELINE SUMMARY")
     print("=" * 70)
-
-    print()
-
-    print(
-        f"Pipeline records: "
-        f"{len(pipeline)}"
-    )
-
+    print(f"Pipeline records: {len(pipeline)}")
     for record in pipeline[-10:]:
+        print(f"• {record.get('prospect')} | {record.get('status')} | ${record.get('price', 0)}")
 
-        print(
-            f"• {record.get('prospect')} | "
-            f"{record.get('status')} | "
-            f"${record.get('price', 0)}"
-        )
-
-    # --------------------------------------------------------
-    # FINAL
-    # --------------------------------------------------------
-
-    print()
+    print("\n" + "=" * 70)
+    print("VERSION 7.2 COMPLETE")
     print("=" * 70)
-    print("VERSION 7.1 COMPLETE")
-    print("=" * 70)
-
-    print()
-
-    print("✅ Real market research")
-    print("✅ AI opportunity selection")
-    print("✅ AI product factory")
-    print("✅ Real prospect discovery")
-    print("✅ Prospect qualification")
+    print("✅ Market research")
+    print("✅ Product generation + persistence")
+    print("✅ Public prospect discovery")
     print("✅ Website research")
+    print("✅ Prospect scoring with preserved prospect data")
     print("✅ Sales pipeline")
-    print("✅ Personalized outreach draft")
-    print("✅ Human approval")
-    print("✅ Real payment tracking")
-    print("✅ Real revenue verification")
-    print("✅ Order architecture")
-    print("✅ Payment-gated delivery")
+    print("✅ Outreach generation + human approval")
+    print("✅ Verified-payment-only revenue")
+    print("✅ Payment-gated delivery architecture")
     print("✅ Persistent memory")
-
-    print()
-
-    print(
-        f"💰 VERIFIED REVENUE: "
-        f"${revenue:.2f}"
-    )
-
-    print()
-
-    print(
-        "Fake revenue: DISABLED"
-    )
-
-    print(
-        "Fake payments: DISABLED"
-    )
-
-    print(
-        "Fake customers: DISABLED"
-    )
-
-    print()
-    print(
-        "NEXT:"
-    )
-
-    print(
-        "VERSION 8 — AI DECISION ENGINE"
-    )
-
-    print()
+    print(f"\n💰 VERIFIED REVENUE: ${revenue:.2f}")
+    print("\nNext milestone: real payment-provider/webhook integration and the control-center UI.")
 
 
 if __name__ == "__main__":
-
     main()
