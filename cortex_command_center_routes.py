@@ -1,8 +1,4 @@
-"""Framework-neutral HTTP route dispatcher for Cortex Command Center.
-
-Returns `(status_code, body)` and leaves HTTP transport concerns to the
-existing dashboard server. Responses are bounded JSON-safe dictionaries.
-"""
+"""Framework-neutral HTTP route dispatcher for Cortex Command Center."""
 
 from __future__ import annotations
 
@@ -11,6 +7,7 @@ from typing import Any, Optional
 from cortex_ai_command import CortexAICommand
 from cortex_command_center import build_command_center_snapshot
 from cortex_command_center_actions import select_provider, test_provider
+from cortex_cycle_history_routes import dispatch_cycle_history_route
 from cortex_scheduler_routes import dispatch_scheduler_route
 from cortex_scheduler_service import CortexSchedulerService
 
@@ -30,12 +27,15 @@ def dispatch_command_center_route(
     runtime_snapshot: Optional[dict[str, Any]] = None,
     scheduler: Optional[CortexSchedulerService] = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Dispatch supported Command Center and scheduler routes safely."""
+    """Dispatch supported Command Center, history, and scheduler routes safely."""
     method = str(method).upper()
     payload = payload or {}
 
     if path.startswith("/api/scheduler"):
         return dispatch_scheduler_route(method, path, payload=payload, service=scheduler)
+
+    if method == "GET" and path == "/api/cycles":
+        return dispatch_cycle_history_route(method, path, runtime_snapshot=runtime_snapshot)
 
     if method == "GET" and path == "/api/command-center":
         return 200, build_command_center_snapshot(
