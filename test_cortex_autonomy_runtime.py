@@ -9,47 +9,51 @@ from cortex_autonomy_runtime import CortexAutonomyRuntime, PATCHABLE_FIELDS
 
 class CortexAutonomyRuntimeTests(unittest.TestCase):
     def test_research_patch_advances_operational_state(self):
-        runtime = CortexAutonomyRuntime({"opportunity": "ai automation"})
-        fake = [{"opportunity": "ai automation", "score": 91}]
-        with patch("cortex_v9_specialists.MarketResearch.research_opportunities", return_value=fake):
-            result = runtime.step(execute=True)
-        self.assertTrue(result["executed"])
-        self.assertTrue(runtime.state["market_researched"])
-        self.assertIn("research_results", result["applied_state_patch"])
-        self.assertNotIn("verified_revenue", result["applied_state_patch"])
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = CortexAutonomyRuntime({"opportunity": "ai automation"}, state_path=os.path.join(directory, "runtime.json"))
+            fake = [{"opportunity": "ai automation", "score": 91}]
+            with patch("cortex_v9_specialists.MarketResearch.research_opportunities", return_value=fake):
+                result = runtime.step(execute=True)
+            self.assertTrue(result["executed"])
+            self.assertTrue(runtime.state["market_researched"])
+            self.assertIn("research_results", result["applied_state_patch"])
+            self.assertNotIn("verified_revenue", result["applied_state_patch"])
 
     def test_runtime_never_allows_financial_truth_to_be_patched(self):
-        runtime = CortexAutonomyRuntime({"verified_revenue": 125, "cash": 50, "recent_action_failed": True})
-        runtime.loop.register("rest_and_observe", lambda state: {
-            "success": True,
-            "state_patch": {
-                "verified_revenue": 999999,
-                "cash": 999999,
-                "market_researched": True,
-            },
-        })
-        result = runtime.step(execute=True)
-        self.assertTrue(result["executed"])
-        self.assertEqual(runtime.state["verified_revenue"], 125)
-        self.assertEqual(runtime.state["cash"], 50)
-        self.assertTrue(runtime.state["market_researched"])
-        self.assertTrue(PATCHABLE_FIELDS.isdisjoint({"verified_revenue", "cash"}))
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = CortexAutonomyRuntime({"verified_revenue": 125, "cash": 50, "recent_action_failed": True}, state_path=os.path.join(directory, "runtime.json"))
+            runtime.loop.register("rest_and_observe", lambda state: {
+                "success": True,
+                "state_patch": {
+                    "verified_revenue": 999999,
+                    "cash": 999999,
+                    "market_researched": True,
+                },
+            })
+            result = runtime.step(execute=True)
+            self.assertTrue(result["executed"])
+            self.assertEqual(runtime.state["verified_revenue"], 125)
+            self.assertEqual(runtime.state["cash"], 50)
+            self.assertTrue(runtime.state["market_researched"])
+            self.assertTrue(PATCHABLE_FIELDS.isdisjoint({"verified_revenue", "cash"}))
 
     def test_failed_handler_sets_failure_observation(self):
-        runtime = CortexAutonomyRuntime({"recent_action_failed": True})
-        runtime.loop.register("rest_and_observe", lambda state: (_ for _ in ()).throw(RuntimeError("boom")))
-        result = runtime.step(execute=True)
-        self.assertFalse(result["executed"])
-        self.assertTrue(runtime.state["recent_action_failed"])
-        self.assertIn("handler_failed", result["outcome"])
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = CortexAutonomyRuntime({"recent_action_failed": True}, state_path=os.path.join(directory, "runtime.json"))
+            runtime.loop.register("rest_and_observe", lambda state: (_ for _ in ()).throw(RuntimeError("boom")))
+            result = runtime.step(execute=True)
+            self.assertFalse(result["executed"])
+            self.assertTrue(runtime.state["recent_action_failed"])
+            self.assertIn("handler_failed", result["outcome"])
 
     def test_snapshot_exposes_real_runtime_state(self):
-        runtime = CortexAutonomyRuntime({"market_researched": True, "verified_revenue": 10})
-        snapshot = runtime.snapshot()
-        self.assertEqual(snapshot["state"]["verified_revenue"], 10)
-        self.assertEqual(snapshot["version"], "10.3")
-        self.assertIn("research_market", snapshot["registered_actions"])
-        self.assertTrue(snapshot["persistence"]["restart_safe"])
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = CortexAutonomyRuntime({"market_researched": True, "verified_revenue": 10}, state_path=os.path.join(directory, "runtime.json"))
+            snapshot = runtime.snapshot()
+            self.assertEqual(snapshot["state"]["verified_revenue"], 10)
+            self.assertEqual(snapshot["version"], "10.3")
+            self.assertIn("research_market", snapshot["registered_actions"])
+            self.assertTrue(snapshot["persistence"]["restart_safe"])
 
     def test_runtime_restores_state_and_history_after_restart(self):
         with tempfile.TemporaryDirectory() as directory:
