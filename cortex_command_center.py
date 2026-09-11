@@ -1,0 +1,78 @@
+"""Unified, browser-safe state surface for the Cortex Command Center.
+
+This module intentionally contains no business execution logic. It composes
+existing governed components into one bounded snapshot for the dashboard:
+AI provider selection/health, recent inter-agent communications, and runtime
+health. Secrets and raw credentials are never exposed.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Optional
+
+from cortex_ai_command import CortexAICommand
+from cortex_ai_health import build_ai_health
+from cortex_communication import communication_status, recent_messages
+from cortex_autonomy_health import evaluate_runtime_health
+
+MAX_EVENTS = 50
+MAX_ERROR_TEXT = 500
+
+
+def _safe_error(exc: Exception) -> str:
+    text = str(exc).strip()
+    return text[:MAX_ERROR_TEXT] if text else type(exc).__name__
+
+
+def build_command_center_snapshot(
+    *,
+    command: Optional[CortexAICommand] = None,
+    runtime_snapshot: Optional[dict[str, Any]] = None,
+    event_limit: int = MAX_EVENTS,
+) -> dict[str, Any]:
+    """Return a bounded snapshot suitable for direct browser consumption."""
+    command = command or CortexAICommand()
+    try:
+        catalog = command.catalog()
+    except Exception as exc:
+        catalog = {"error": _safe_error(exc)}
+    try:
+        selected = command.selected()
+    except Exception as exc:
+        selected = {"selected": False, "error": _safe_error(exc)}
+    try:
+        ai_health = build_ai_health(command)
+    except Exception as exc:
+        ai_health = {"status": "DEGRADED", "error": _safe_error(exc)}
+
+    try:
+        communication = {
+            "status": communication_status(),
+            "events": recent_messages(limit=max(1, min(int(event_limit), MAX_EVENTS))),
+        }
+    except Exception as exc:
+        communication = {"status": "DEGRADED", "events": [], "error": _safe_error(exc)}
+
+    runtime_health = None
+    if runtime_snapshot is not None:
+        try:
+            runtime_health = evaluate_runtime_health(runtime_snapshot)
+        except Exception as exc:
+            runtime_health = {"status": "INVALID_SNAPSHOT", "error": _safe_error(exc)}
+
+    return {
+        "engine": "Cortex Command Center",
+        "version": "9.3.1",
+        "ai": {
+            "catalog": catalog,
+            "selected": selected,
+            "health": ai_health,
+        },
+        "communications": communication,
+        "runtime_health": runtime_health,
+        "truth_policy": {
+            "revenue": "verified observations only",
+            "credentials": "server-side only",
+            "execution": "governed",
+        },
+    }
