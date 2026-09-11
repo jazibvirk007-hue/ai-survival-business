@@ -5,7 +5,7 @@ never fabricates results and never executes external actions by itself.
 """
 
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,7 @@ class Experiment:
             raise ValueError("metric must be non-empty")
         if not isinstance(self.baseline, (int, float)) or not isinstance(self.target, (int, float)):
             raise ValueError("baseline and target must be numeric")
-        if direction not in ("increase", "decrease"):
+        if self.direction not in ("increase", "decrease"):
             raise ValueError("direction must be increase or decrease")
 
 
