@@ -51,11 +51,12 @@ class AICEOAIAdvisoryTests(unittest.TestCase):
         self.assertIn(candidates[0].action, {"qualify_prospects", "review_financials"})
         self.assertNotEqual(candidates[0].action, "send_money_to_me")
 
-    def test_malformed_ai_output_falls_back(self):
+    def test_malformed_ai_output_falls_back_to_deterministic_ranking(self):
         runtime = FakeRuntime("not-json")
         ceo = AICEO(ai_runtime=runtime, ai_selection=AISelection("local_ollama", "local-model"), ai_enabled=True)
+        expected = AICEO().decide(self.state()).action
         decision = ceo.decide(self.state())
-        self.assertEqual(decision.action, "review_financials")
+        self.assertEqual(decision.action, expected)
         self.assertEqual(runtime.calls, 1)
 
     def test_ai_disabled_does_not_call_runtime(self):
