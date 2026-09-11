@@ -46,9 +46,12 @@ def score_candidate(candidate: dict[str, Any]) -> AcquisitionDecision:
     if not isinstance(need, str) or not need.strip():
         return AcquisitionDecision(False, 0, "missing_verified_need", "qualify")
 
+    # 20 points for a factual source/need record, 60 for fit, 20 for a
+    # verified contact path. This gives a true 0..100 scale without changing
+    # the eligibility threshold.
     score = 20
     if isinstance(fit, (int, float)) and not isinstance(fit, bool):
-        score += max(0, min(40, int(fit)))
+        score += max(0, min(60, int(fit)))
     if contactable is True:
         score += 20
     elif contactable is not False:
