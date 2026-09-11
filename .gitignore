@@ -9,6 +9,7 @@ webhook_events.json
 cortex_memory.json
 cortex_approvals.json
 cortex_communications.json
+cortex_ai_selection.json
 generated_products/
 deliveries/
 .env
