@@ -1,0 +1,142 @@
+"""V12 Cortex Voice CEO command layer.
+
+Provides the safe bridge between speech-to-text input and the existing Cortex
+CEO/runtime. Audio capture and speech synthesis are deliberately adapters at
+the edge; this module owns transcript validation, deterministic intent routing,
+state observation, and governed-cycle requests.
+
+No voice command can bypass Cortex Guard, payment truth, or the scheduler.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Callable, Optional
+
+from cortex_communication import record_message
+from cortex_v95_orchestrator import CortexV95Orchestrator
+
+MAX_TRANSCRIPT = 4000
+MAX_RESPONSE = 2000
+
+
+@dataclass(frozen=True)
+class VoiceCommand:
+    """Normalized voice command with no credentials or hidden payloads."""
+    transcript: str
+    intent: str
+    execute: bool = False
+
+
+class CortexVoiceCEO:
+    """Provider-neutral Voice CEO gateway for the shared Cortex runtime."""
+
+    def __init__(
+        self,
+        orchestrator: CortexV95Orchestrator,
+        *,
+        speech_to_text: Optional[Callable[[Any], str]] = None,
+        text_to_speech: Optional[Callable[[str], Any]] = None,
+        communication_path: str = "cortex_communications.json",
+    ) -> None:
+        if not isinstance(orchestrator, CortexV95Orchestrator):
+            raise TypeError("orchestrator must be CortexV95Orchestrator")
+        if speech_to_text is not None and not callable(speech_to_text):
+            raise TypeError("speech_to_text must be callable")
+        if text_to_speech is not None and not callable(text_to_speech):
+            raise TypeError("text_to_speech must be callable")
+        if not isinstance(communication_path, str) or not communication_path.strip():
+            raise ValueError("communication_path is required")
+        self.orchestrator = orchestrator
+        self.speech_to_text = speech_to_text
+        self.text_to_speech = text_to_speech
+        self.communication_path = communication_path
+
+    @staticmethod
+    def normalize_transcript(transcript: str) -> str:
+        if not isinstance(transcript, str) or not transcript.strip():
+            raise ValueError("transcript is required")
+        transcript = " ".join(transcript.strip().split())
+        if len(transcript) > MAX_TRANSCRIPT:
+            raise ValueError("transcript is too long")
+        return transcript
+
+    @classmethod
+    def classify(cls, transcript: str) -> VoiceCommand:
+        text = cls.normalize_transcript(transcript)
+        lower = text.lower()
+        if any(token in lower for token in ("status", "how are we doing", "business update", "what's happening", "whats happening")):
+            intent = "status"
+        elif any(token in lower for token in ("run one cycle", "run a cycle", "next cycle", "think about the next action", "what should cortex do next")):
+            intent = "cycle"
+        elif any(token in lower for token in ("pause cortex", "pause scheduler", "stop autonomous", "stop cortex")):
+            intent = "pause"
+        elif any(token in lower for token in ("resume cortex", "resume scheduler", "start autonomous")):
+            intent = "resume"
+        else:
+            intent = "conversation"
+        return VoiceCommand(text, intent, execute=False)
+
+    @staticmethod
+    def _status_response(observation: dict[str, Any]) -> str:
+        runtime = observation.get("runtime", {}) if isinstance(observation, dict) else {}
+        state = runtime.get("state", {}) if isinstance(runtime, dict) else {}
+        history = runtime.get("history_count", 0) if isinstance(runtime, dict) else 0
+        action = "unknown"
+        if isinstance(runtime.get("registered_actions"), list) and runtime.get("registered_actions"):
+            action = state.get("current_decision", "ready")
+        return f"Cortex is online. The shared runtime has {history} recorded cycles. Current decision state: {action}. Verified financial truth remains authoritative."
+
+    def handle_transcript(self, transcript: str) -> dict[str, Any]:
+        command = self.classify(transcript)
+        correlation = "VOICE-" + command.intent.upper()
+        try:
+            record_message("Voice CEO", "Cortex CEO", "voice_command", command.transcript, correlation_id=correlation, path=self.communication_path)
+        except Exception:
+            pass
+
+        if command.intent == "status":
+            observation = self.orchestrator.observe()
+            response = self._status_response(observation)
+            result = {"ok": True, "command": command.__dict__, "response": response, "executed": False, "observation": observation}
+        elif command.intent == "cycle":
+            # Voice may request a bounded cycle, but it starts in decision-only mode.
+            result = self.orchestrator.tick(execute=False)
+            response = "I ran one bounded Cortex decision cycle in observation mode. No external action was executed."
+            result = {"ok": True, "command": command.__dict__, "response": response, "executed": False, "cycle": result["cycle"], "runtime": result["runtime"]}
+        elif command.intent == "pause":
+            from cortex_scheduler_service import CortexSchedulerService
+            scheduler = CortexSchedulerService(self.orchestrator)
+            response = "Cortex autonomous scheduling is paused."
+            result = {"ok": True, "command": command.__dict__, "response": response, "executed": True, "scheduler": scheduler.pause()}
+        elif command.intent == "resume":
+            from cortex_scheduler_service import CortexSchedulerService
+            scheduler = CortexSchedulerService(self.orchestrator)
+            response = "Cortex autonomous scheduling is resumed."
+            result = {"ok": True, "command": command.__dict__, "response": response, "executed": True, "scheduler": scheduler.resume()}
+        else:
+            result = {"ok": True, "command": command.__dict__, "response": "I can report Cortex status or request a bounded decision cycle. Customer-facing, financial, and irreversible actions remain governed by Cortex Guard." , "executed": False}
+
+        if self.text_to_speech:
+            self.text_to_speech(str(result["response"])[:MAX_RESPONSE])
+        return result
+
+    def handle_audio(self, audio: Any) -> dict[str, Any]:
+        """Convert audio at the edge, then route only the normalized transcript."""
+        if self.speech_to_text is None:
+            raise RuntimeError("speech_to_text adapter is not configured")
+        transcript = self.speech_to_text(audio)
+        return self.handle_transcript(transcript)
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "engine": "Cortex Voice CEO",
+            "version": "12.0",
+            "status": "READY",
+            "speech_to_text": self.speech_to_text is not None,
+            "text_to_speech": self.text_to_speech is not None,
+            "shared_runtime": True,
+            "decision_cycle": "bounded_and_observation_first",
+            "execution_authority": "Cortex scheduler + Guard",
+            "credential_policy": "voice layer receives no provider credentials",
+            "truth_policy": "verified business observations only",
+        }
