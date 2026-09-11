@@ -5,11 +5,14 @@ CEO/runtime. Audio capture and speech synthesis are deliberately adapters at
 the edge; this module owns transcript validation, deterministic intent routing,
 state observation, and governed-cycle requests.
 
-No voice command can bypass Cortex Guard, payment truth, or the scheduler.
+Voice is never an authorization boundary: customer-facing, financial,
+irreversible, or scheduler-control actions require the existing governance
+path and are not executed directly from an HTTP/browser voice request.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+import uuid
 from typing import Any, Callable, Optional
 
 from cortex_communication import record_message
@@ -86,36 +89,66 @@ class CortexVoiceCEO:
             action = state.get("current_decision", "ready")
         return f"Cortex is online. The shared runtime has {history} recorded cycles. Current decision state: {action}. Verified financial truth remains authoritative."
 
-    def handle_transcript(self, transcript: str) -> dict[str, Any]:
-        command = self.classify(transcript)
-        correlation = "VOICE-" + command.intent.upper()
+    @staticmethod
+    def _correlation_id() -> str:
+        return "VOICE-" + uuid.uuid4().hex[:12].upper()
+
+    def _record_event(self, event_type: str, summary: str, correlation: str, metadata: dict[str, Any]) -> None:
+        """Record safe voice lifecycle telemetry; never persist transcript text."""
         try:
-            record_message("Voice CEO", "Cortex CEO", "voice_command", command.transcript, correlation_id=correlation, path=self.communication_path)
+            record_message(
+                "Voice CEO",
+                "Cortex CEO",
+                event_type,
+                summary,
+                correlation_id=correlation,
+                path=self.communication_path,
+                metadata=metadata,
+            )
         except Exception:
             pass
+
+    def handle_transcript(self, transcript: str) -> dict[str, Any]:
+        command = self.classify(transcript)
+        correlation = self._correlation_id()
+        self._record_event(
+            "voice_command",
+            "Voice CEO command received",
+            correlation,
+            {"intent": command.intent, "transcript_chars": len(command.transcript)},
+        )
 
         if command.intent == "status":
             observation = self.orchestrator.observe()
             response = self._status_response(observation)
             result = {"ok": True, "command": command.__dict__, "response": response, "executed": False, "observation": observation}
         elif command.intent == "cycle":
-            # Voice may request a bounded cycle, but it starts in decision-only mode.
-            result = self.orchestrator.tick(execute=False)
+            cycle_result = self.orchestrator.tick(execute=False)
             response = "I ran one bounded Cortex decision cycle in observation mode. No external action was executed."
-            result = {"ok": True, "command": command.__dict__, "response": response, "executed": False, "cycle": result["cycle"], "runtime": result["runtime"]}
-        elif command.intent == "pause":
-            from cortex_scheduler_service import CortexSchedulerService
-            scheduler = CortexSchedulerService(self.orchestrator)
-            response = "Cortex autonomous scheduling is paused."
-            result = {"ok": True, "command": command.__dict__, "response": response, "executed": True, "scheduler": scheduler.pause()}
-        elif command.intent == "resume":
-            from cortex_scheduler_service import CortexSchedulerService
-            scheduler = CortexSchedulerService(self.orchestrator)
-            response = "Cortex autonomous scheduling is resumed."
-            result = {"ok": True, "command": command.__dict__, "response": response, "executed": True, "scheduler": scheduler.resume()}
+            result = {"ok": True, "command": command.__dict__, "response": response, "executed": False, "cycle": cycle_result["cycle"], "runtime": cycle_result["runtime"]}
+        elif command.intent in {"pause", "resume"}:
+            # Scheduler control is an authorization-sensitive action. The voice
+            # edge may request it, but cannot directly mutate scheduler state.
+            action = "pause" if command.intent == "pause" else "resume"
+            response = f"A scheduler {action} was requested, but Voice CEO cannot execute that control directly. Approval through Cortex Guard is required."
+            result = {
+                "ok": True,
+                "command": command.__dict__,
+                "response": response,
+                "executed": False,
+                "requires_approval": True,
+                "requested_action": f"scheduler.{action}",
+                "governance": "Cortex Guard",
+            }
         else:
-            result = {"ok": True, "command": command.__dict__, "response": "I can report Cortex status or request a bounded decision cycle. Customer-facing, financial, and irreversible actions remain governed by Cortex Guard." , "executed": False}
+            result = {"ok": True, "command": command.__dict__, "response": "I can report Cortex status or request a bounded decision cycle. Customer-facing, financial, and irreversible actions remain governed by Cortex Guard.", "executed": False}
 
+        self._record_event(
+            "voice_response",
+            "Voice CEO response generated",
+            correlation,
+            {"intent": command.intent, "executed": bool(result.get("executed")), "response_chars": len(str(result["response"]))},
+        )
         if self.text_to_speech:
             self.text_to_speech(str(result["response"])[:MAX_RESPONSE])
         return result
@@ -139,4 +172,5 @@ class CortexVoiceCEO:
             "execution_authority": "Cortex scheduler + Guard",
             "credential_policy": "voice layer receives no provider credentials",
             "truth_policy": "verified business observations only",
+            "control_policy": "voice requests cannot directly mutate scheduler or external state",
         }
