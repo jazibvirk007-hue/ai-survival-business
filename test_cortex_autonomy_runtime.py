@@ -16,7 +16,7 @@ class CortexAutonomyRuntimeTests(unittest.TestCase):
         self.assertNotIn("verified_revenue", result["applied_state_patch"])
 
     def test_runtime_never_allows_financial_truth_to_be_patched(self):
-        runtime = CortexAutonomyRuntime({"verified_revenue": 125, "cash": 50})
+        runtime = CortexAutonomyRuntime({"verified_revenue": 125, "cash": 50, "recent_action_failed": True})
         runtime.loop.register("rest_and_observe", lambda state: {
             "success": True,
             "state_patch": {
@@ -25,7 +25,6 @@ class CortexAutonomyRuntimeTests(unittest.TestCase):
                 "market_researched": True,
             },
         })
-        runtime.loop.ceo.history.clear()
         result = runtime.step(execute=True)
         self.assertTrue(result["executed"])
         self.assertEqual(runtime.state["verified_revenue"], 125)
@@ -34,11 +33,12 @@ class CortexAutonomyRuntimeTests(unittest.TestCase):
         self.assertTrue(PATCHABLE_FIELDS.isdisjoint({"verified_revenue", "cash"}))
 
     def test_failed_handler_sets_failure_observation(self):
-        runtime = CortexAutonomyRuntime({"recent_action_failed": False})
+        runtime = CortexAutonomyRuntime({"recent_action_failed": True})
         runtime.loop.register("rest_and_observe", lambda state: (_ for _ in ()).throw(RuntimeError("boom")))
         result = runtime.step(execute=True)
         self.assertFalse(result["executed"])
         self.assertTrue(runtime.state["recent_action_failed"])
+        self.assertIn("handler_failed", result["outcome"])
 
     def test_snapshot_exposes_real_runtime_state(self):
         runtime = CortexAutonomyRuntime({"market_researched": True, "verified_revenue": 10})
