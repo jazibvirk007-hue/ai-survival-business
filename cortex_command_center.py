@@ -15,7 +15,6 @@ from cortex_ai_command import CortexAICommand
 from cortex_ai_health import build_ai_health
 from cortex_communication import communication_status, recent_messages
 from cortex_autonomy_health import evaluate_runtime_health
-from cortex_scheduler_service import CortexSchedulerService
 
 MAX_EVENTS = 50
 MAX_ERROR_TEXT = 500
@@ -30,7 +29,7 @@ def build_command_center_snapshot(
     *,
     command: Optional[CortexAICommand] = None,
     runtime_snapshot: Optional[dict[str, Any]] = None,
-    scheduler: Optional[CortexSchedulerService] = None,
+    scheduler: Optional[Any] = None,
     event_limit: int = MAX_EVENTS,
 ) -> dict[str, Any]:
     """Return a bounded snapshot suitable for direct browser consumption."""
@@ -65,13 +64,16 @@ def build_command_center_snapshot(
 
     scheduler_snapshot = None
     try:
-        scheduler_snapshot = (scheduler or CortexSchedulerService()).snapshot()
+        if scheduler is None:
+            from cortex_scheduler_service import CortexSchedulerService
+            scheduler = CortexSchedulerService()
+        scheduler_snapshot = scheduler.snapshot()
     except Exception as exc:
         scheduler_snapshot = {"status": "DEGRADED", "error": _safe_error(exc)}
 
     return {
         "engine": "Cortex Command Center",
-        "version": "9.5.0",
+        "version": "9.5.1",
         "ai": {
             "catalog": catalog,
             "selected": selected,
