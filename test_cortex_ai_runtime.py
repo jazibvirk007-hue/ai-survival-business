@@ -52,6 +52,24 @@ class CortexAIRuntimeTests(unittest.TestCase):
         with patch.dict(os.environ, {"COHERE_API_KEY": "secret"}, clear=False):
             self.assertEqual(runtime.generate(selection, [{"role": "user", "content": "hi"}]), "hello")
 
+    def test_custom_openai_endpoint_is_server_side(self):
+        seen = {}
+        def opener(request, timeout):
+            seen["url"] = request.full_url
+            seen["auth"] = request.headers.get("Authorization")
+            return FakeResponse({"data": [{"id": "custom-model"}]})
+        runtime = CortexAIRuntime(opener=opener)
+        with patch.dict(os.environ, {"CUSTOM_AI_BASE_URL": "https://internal.example/v1", "CUSTOM_AI_API_KEY": "secret"}, clear=True):
+            self.assertEqual(runtime.discover_models("custom_openai"), ["custom-model"])
+        self.assertEqual(seen["url"], "https://internal.example/v1/models")
+        self.assertEqual(seen["auth"], "Bearer secret")
+
+    def test_custom_endpoint_missing_fails_closed(self):
+        runtime = CortexAIRuntime(opener=opener_for({}))
+        with patch.dict(os.environ, {"CUSTOM_AI_API_KEY": "secret"}, clear=True):
+            with self.assertRaises(AIRuntimeError):
+                runtime.discover_models("custom_openai")
+
     def test_missing_secret_fails_closed(self):
         runtime = CortexAIRuntime(opener=opener_for({}))
         selection = AISelection("openai", "model-a")
