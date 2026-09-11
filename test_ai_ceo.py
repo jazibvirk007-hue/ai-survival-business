@@ -54,7 +54,7 @@ class AICEODecisionTests(unittest.TestCase):
         self.assertTrue(decision.reason)
         self.assertTrue(decision.expected_outcome)
         self.assertEqual(ceo.status()["max_actions_per_cycle"], 1)
-        self.assertEqual(ceo.status()["execution_policy"], "decision_only; model output cannot authorize actions; irreversible actions require explicit approval")
+        self.assertEqual(ceo.status()["execution_policy"], "decision_only; model output and learning cannot authorize actions; irreversible actions require explicit approval")
 
 
 if __name__ == "__main__":
