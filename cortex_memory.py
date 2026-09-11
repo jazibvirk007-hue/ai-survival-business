@@ -25,6 +25,8 @@ class CortexMemory:
     def _load(self):
         if not os.path.exists(self.path):
             return []
+        if os.path.getsize(self.path) == 0:
+            return []
         with open(self.path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
         if not isinstance(data, list):
