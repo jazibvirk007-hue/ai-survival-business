@@ -2,12 +2,17 @@
 
 V8 turns observed business state into a bounded, explainable next action.
 V8.2 adds conservative profit-aware prioritization using observed economics.
-It never fabricates revenue and never performs irreversible external actions.
+V9.2 optionally uses a selected AI provider to *rank existing safe candidates*.
+The model can never create an action, change financial truth, or authorize execution.
 """
 
-from dataclasses import dataclass, asdict
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass, asdict, replace
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 ACTIONS = (
@@ -38,7 +43,15 @@ class Decision:
 class AICEO:
     """Choose the safest highest-value next business action from observed state."""
 
-    def __init__(self, minimum_cash: float = 0.0, max_actions_per_cycle: int = 1):
+    def __init__(
+        self,
+        minimum_cash: float = 0.0,
+        max_actions_per_cycle: int = 1,
+        *,
+        ai_runtime: Optional[Any] = None,
+        ai_selection: Optional[Any] = None,
+        ai_enabled: Optional[bool] = None,
+    ):
         if minimum_cash < 0:
             raise ValueError("minimum_cash cannot be negative")
         if max_actions_per_cycle < 1:
@@ -46,6 +59,11 @@ class AICEO:
         self.minimum_cash = float(minimum_cash)
         self.max_actions_per_cycle = int(max_actions_per_cycle)
         self.history: List[Dict[str, Any]] = []
+        self.ai_runtime = ai_runtime
+        self.ai_selection = ai_selection
+        self.ai_enabled = bool(
+            ai_enabled if ai_enabled is not None else os.getenv("TJ_CORTEX_AI_AUGMENT", "false").strip().lower() in {"1", "true", "yes", "on"}
+        )
 
     @staticmethod
     def _number(state: Dict[str, Any], key: str, default: float = 0.0) -> float:
@@ -57,11 +75,7 @@ class AICEO:
 
     @staticmethod
     def _profit_adjustment(action: str, state: Dict[str, Any]) -> float:
-        """Apply small bounded adjustments from observed unit economics.
-
-        The adjustment is intentionally capped so economics can influence, but
-        never completely override, operational safety priorities.
-        """
+        """Apply small bounded adjustments from observed unit economics."""
         adjustment = 0.0
         margin = state.get("gross_margin")
         cac = state.get("cac")
@@ -86,6 +100,59 @@ class AICEO:
             elif action == "create_product":
                 adjustment -= 4
         return max(-10.0, min(15.0, adjustment))
+
+    def _ai_rank(self, candidates: List[Decision], state: Dict[str, Any]) -> List[Decision]:
+        """Ask the selected model to rank only deterministic candidates.
+
+        This is advisory intelligence, not policy. Invalid output, network errors,
+        unknown actions, score manipulation, or malformed JSON all fail closed to
+        the deterministic ranking already computed by this class.
+        """
+        if not self.ai_enabled or self.ai_runtime is None or self.ai_selection is None or len(candidates) < 2:
+            return candidates
+        try:
+            payload = {
+                "observed_state": {k: v for k, v in state.items() if k not in {"secret", "api_key", "token", "private_key"}},
+                "candidate_actions": [
+                    {"action": d.action, "priority": d.priority, "requires_approval": d.requires_approval}
+                    for d in candidates
+                ],
+                "instruction": "Return JSON only: {\"ranking\":[{\"action\":string,\"score\":number}]}. Rank only the listed actions. Never invent actions.",
+            }
+            text = self.ai_runtime.generate(
+                self.ai_selection,
+                [
+                    {"role": "system", "content": "You are an advisory business analyst. You cannot authorize actions or alter financial truth."},
+                    {"role": "user", "content": json.dumps(payload, separators=(",", ":"))},
+                ],
+                temperature=0.0,
+            )
+            data = json.loads(text)
+            ranking = data.get("ranking") if isinstance(data, dict) else None
+            if not isinstance(ranking, list):
+                return candidates
+            allowed = {d.action for d in candidates}
+            scores: Dict[str, float] = {}
+            for item in ranking[:len(candidates)]:
+                if not isinstance(item, dict) or item.get("action") not in allowed:
+                    continue
+                try:
+                    score = float(item.get("score"))
+                except (TypeError, ValueError):
+                    continue
+                if score == score and score not in (float("inf"), float("-inf")):
+                    scores[item["action"]] = max(0.0, min(100.0, score))
+            if not scores:
+                return candidates
+            # Blend model advice with deterministic priority. Deterministic policy
+            # remains the majority signal and approval flags/reasons are untouched.
+            return sorted(
+                candidates,
+                key=lambda d: (0.70 * d.priority + 0.30 * scores.get(d.action, d.priority), d.priority),
+                reverse=True,
+            )
+        except Exception:
+            return candidates
 
     def evaluate(self, state: Dict[str, Any]) -> List[Decision]:
         """Return ranked candidate decisions without executing any action."""
@@ -135,9 +202,10 @@ class AICEO:
             bonus = self._profit_adjustment(decision.action, state)
             if bonus:
                 reason = f"{decision.reason} Profit intelligence adjustment: {bonus:+.0f} based only on observed economics."
-                decision = Decision(decision.action, max(0.0, min(100.0, decision.priority + bonus)), reason, decision.expected_outcome, decision.requires_approval)
+                decision = replace(decision, priority=max(0.0, min(100.0, decision.priority + bonus)), reason=reason)
             adjusted.append(decision)
-        return sorted(adjusted, key=lambda item: item.priority, reverse=True)[: max(1, self.max_actions_per_cycle)]
+        adjusted = sorted(adjusted, key=lambda item: item.priority, reverse=True)
+        return self._ai_rank(adjusted, state)[: max(1, self.max_actions_per_cycle)]
 
     def decide(self, state: Dict[str, Any]) -> Decision:
         decision = self.evaluate(state)[0]
@@ -146,16 +214,29 @@ class AICEO:
             "decision": decision.to_dict(),
             "verified_revenue": max(0.0, self._number(state, "verified_revenue")),
             "cash": max(0.0, self._number(state, "cash", 0.0)),
+            "ai_advisory": bool(self.ai_enabled and self.ai_runtime is not None and self.ai_selection is not None),
         })
         return decision
 
     def status(self) -> Dict[str, Any]:
+        selection = self.ai_selection
+        ai_status: Dict[str, Any] = {"enabled": bool(self.ai_enabled), "configured": False}
+        if selection is not None:
+            ai_status["provider_id"] = getattr(selection, "provider_id", "")
+            ai_status["model"] = getattr(selection, "model", "")
+        if self.ai_runtime is not None and selection is not None:
+            try:
+                safe = self.ai_runtime.status(selection)
+                ai_status["configured"] = bool(safe.get("configured", False))
+            except Exception:
+                ai_status["configured"] = False
         return {
             "engine": "AI CEO",
-            "version": "8.2",
+            "version": "9.2",
             "decisions_recorded": len(self.history),
             "max_actions_per_cycle": self.max_actions_per_cycle,
             "minimum_cash": self.minimum_cash,
             "profit_intelligence": "bounded_observed_economics",
-            "execution_policy": "decision_only; irreversible actions require explicit approval",
+            "ai_advisory": ai_status,
+            "execution_policy": "decision_only; model output cannot authorize actions; irreversible actions require explicit approval",
         }
