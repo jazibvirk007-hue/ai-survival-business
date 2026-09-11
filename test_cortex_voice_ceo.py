@@ -18,7 +18,11 @@ class VoiceCEOTests(unittest.TestCase):
             "cycle": {"cycle_id": "V9-TEST", "executed": False},
             "runtime": {"history_count": 5},
         }
-        self.voice = CortexVoiceCEO(self.orchestrator)
+        self.voice = CortexVoiceCEO.__new__(CortexVoiceCEO)
+        self.voice.orchestrator = self.orchestrator
+        self.voice.speech_to_text = None
+        self.voice.text_to_speech = None
+        self.voice.communication_path = "cortex_communications.json"
 
     def test_classifies_status(self):
         command = self.voice.classify("  Cortex, what is the business status?  ")
@@ -38,6 +42,20 @@ class VoiceCEOTests(unittest.TestCase):
         self.assertFalse(result["executed"])
         self.orchestrator.tick.assert_called_once_with(execute=False)
 
+    def test_pause_requires_governance(self):
+        result = self.voice.handle_transcript("pause cortex")
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["executed"])
+        self.assertTrue(result["requires_approval"])
+        self.assertEqual(result["requested_action"], "scheduler.pause")
+
+    def test_resume_requires_governance(self):
+        result = self.voice.handle_transcript("resume cortex")
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["executed"])
+        self.assertTrue(result["requires_approval"])
+        self.assertEqual(result["requested_action"], "scheduler.resume")
+
     def test_unknown_request_never_executes(self):
         result = self.voice.handle_transcript("Send a message to every customer")
         self.assertTrue(result["ok"])
@@ -50,7 +68,11 @@ class VoiceCEOTests(unittest.TestCase):
 
     def test_audio_adapter_routes_transcript(self):
         speech = Mock(return_value="status")
-        voice = CortexVoiceCEO(self.orchestrator, speech_to_text=speech)
+        voice = CortexVoiceCEO.__new__(CortexVoiceCEO)
+        voice.orchestrator = self.orchestrator
+        voice.speech_to_text = speech
+        voice.text_to_speech = None
+        voice.communication_path = "cortex_communications.json"
         result = voice.handle_audio(b"audio")
         self.assertTrue(result["ok"])
         speech.assert_called_once_with(b"audio")
@@ -64,6 +86,7 @@ class VoiceCEOTests(unittest.TestCase):
         self.assertEqual(status["version"], "12.0")
         self.assertTrue(status["shared_runtime"])
         self.assertEqual(status["decision_cycle"], "bounded_and_observation_first")
+        self.assertEqual(status["control_policy"], "voice requests cannot directly mutate scheduler or external state")
 
 
 if __name__ == "__main__":
