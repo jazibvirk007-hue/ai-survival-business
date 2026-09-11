@@ -26,11 +26,13 @@ def _validate(state: Any) -> dict[str, Any]:
 def load_scheduler_state(path: str = STATE_PATH) -> dict[str, Any]:
     if not os.path.exists(path):
         return {}
+    if os.path.getsize(path) == 0:
+        return {}
     try:
         with open(path, "r", encoding="utf-8") as handle:
             return _validate(json.load(handle))
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        raise ValueError("invalid persisted scheduler state")
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid persisted scheduler state") from exc
 
 
 def save_scheduler_state(state: dict[str, Any], path: str = STATE_PATH) -> None:
