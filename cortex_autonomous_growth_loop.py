@@ -1,13 +1,9 @@
 """V9 Autonomous Growth Loop for TJ Cortex.
 
-This is the orchestration backbone that connects the existing Cortex engines into
-one bounded feedback loop:
-
 observe -> CEO decision -> specialist handoff -> observed outcome -> learning.
-
-A cycle performs at most one registered stage. External/customer-facing actions
-remain guarded by the stage handler and Cortex Guard; this module never invents
-customers, revenue, conversions, or successful outcomes.
+The CEO may use an optional selected AI provider for advisory ranking, while
+Cortex policy, Guard, payment verification, and execution boundaries remain
+authoritative.
 """
 
 from __future__ import annotations
@@ -17,11 +13,11 @@ from typing import Any, Callable, Dict, List, Optional
 import uuid
 
 from ai_ceo import AICEO
+from cortex_ceo_config import ai_advisory_from_env
 from cortex_communication import record_message
 from cortex_guard import CortexGuard
 from cortex_learning import CortexLearning
 from cortex_memory import CortexMemory
-
 
 STAGE_BY_ACTION = {
     "research_market": "Intelligence",
@@ -50,8 +46,19 @@ class AutonomousGrowthLoop:
         guard: Optional[CortexGuard] = None,
         learning: Optional[CortexLearning] = None,
         communication_path: str = "cortex_communications.json",
+        ai_runtime: Optional[Any] = None,
+        ai_selection: Optional[Any] = None,
+        ai_enabled: Optional[bool] = None,
     ) -> None:
-        self.ceo = AICEO(minimum_cash=minimum_cash, max_actions_per_cycle=max_actions_per_cycle)
+        if ai_runtime is None and ai_selection is None and ai_enabled is None:
+            ai_runtime, ai_selection, ai_enabled = ai_advisory_from_env()
+        self.ceo = AICEO(
+            minimum_cash=minimum_cash,
+            max_actions_per_cycle=max_actions_per_cycle,
+            ai_runtime=ai_runtime,
+            ai_selection=ai_selection,
+            ai_enabled=ai_enabled,
+        )
         self.guard = guard if guard is not None else CortexGuard()
         if not isinstance(self.guard, CortexGuard):
             raise TypeError("guard must be a CortexGuard")
@@ -63,11 +70,6 @@ class AutonomousGrowthLoop:
         self.history: List[Dict[str, Any]] = []
 
     def register(self, action: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
-        """Register one specialist stage handler.
-
-        Handlers receive a shallow copy of the observed state and must return an
-        observed result. They should not bypass Guard or create fake outcomes.
-        """
         if action not in STAGE_BY_ACTION:
             raise ValueError(f"unsupported growth action: {action}")
         if not callable(handler):
@@ -78,7 +80,6 @@ class AutonomousGrowthLoop:
         try:
             record_message(sender, recipient, message_type, summary, status=status, correlation_id=correlation_id, metadata=metadata, path=self.communication_path)
         except Exception:
-            # Visualization/observability cannot break the business loop.
             pass
 
     @staticmethod
@@ -88,13 +89,6 @@ class AutonomousGrowthLoop:
         return result is not None
 
     def cycle(self, state: Dict[str, Any], *, execute: bool = False, approval_id: Optional[str] = None) -> Dict[str, Any]:
-        """Run one bounded autonomous cycle.
-
-        With execute=False (default), the loop produces a decision and a
-        specialist handoff plan but performs no handler action. With execute=True,
-        only a registered handler is called. External actions additionally require
-        a matching, unexpired Guard approval.
-        """
         if not isinstance(state, dict):
             raise TypeError("state must be a dictionary")
 
@@ -146,7 +140,7 @@ class AutonomousGrowthLoop:
                 return self._finish(result)
 
         try:
-            self._emit(stage, STAGE_BY_ACTION.get(action, "Cortex CEO"), "execution", f"Executing {action}", cycle_id, status="started")
+            self._emit(stage, "Cortex CEO", "execution", f"Executing {action}", cycle_id, status="started")
             outcome = handler(dict(state))
             result["outcome"] = outcome
             result["executed"] = True
@@ -174,23 +168,13 @@ class AutonomousGrowthLoop:
     def status(self) -> Dict[str, Any]:
         return {
             "engine": "Cortex V9 Autonomous Growth Loop",
-            "version": "9.0",
+            "version": "9.2",
             "cycles": len(self.history),
             "registered_actions": sorted(self.handlers),
-            "pipeline": [
-                "Research",
-                "Opportunity",
-                "Product",
-                "Prospect",
-                "Content/Outreach",
-                "Customer",
-                "Sale",
-                "Delivery",
-                "Profit",
-                "Learning",
-            ],
+            "pipeline": ["Research", "Opportunity", "Product", "Prospect", "Content/Outreach", "Customer", "Sale", "Delivery", "Profit", "Learning"],
             "execution_policy": "one_bounded_stage_per_cycle",
             "external_actions": "Cortex Guard approval required",
             "revenue_policy": "verified_observations_only",
             "communication_stream": "live_event_bus",
+            "ai_advisory": self.ceo.status().get("ai_advisory", {}),
         }
