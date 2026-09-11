@@ -23,7 +23,7 @@ class CommandCenterTests(unittest.TestCase):
             snapshot = build_command_center_snapshot(command=FakeCommand(), event_limit=10)
 
         self.assertEqual(snapshot["engine"], "Cortex Command Center")
-        self.assertEqual(snapshot["version"], "9.3.1")
+        self.assertEqual(snapshot["version"], "9.5.2")
         self.assertEqual(snapshot["ai"]["selected"]["provider_id"], "local_ollama")
         self.assertEqual(snapshot["ai"]["health"]["status"], "READY")
         self.assertEqual(len(snapshot["communications"]["events"]), 1)
