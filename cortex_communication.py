@@ -82,7 +82,11 @@ def record_message(
     if metadata:
         for key, value in metadata.items():
             key_text = _safe_text(key)
-            if key_text and len(clean_metadata) < 20 and isinstance(value, (str, int, float, bool, type(None))):
+            if not key_text or len(clean_metadata) >= 20:
+                continue
+            if isinstance(value, str):
+                clean_metadata[key_text] = _safe_text(value)
+            elif isinstance(value, (int, float, bool, type(None))):
                 clean_metadata[key_text] = value
 
     event = {
