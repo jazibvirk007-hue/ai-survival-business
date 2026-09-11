@@ -97,18 +97,19 @@ class CortexAutonomyRuntime:
             self.state["recent_action_failed"] = True
 
         result["memory_strategy"] = strategy
+        result["applied_state_patch"] = patch
+        result["state_changed"] = before != self.state
+        result["cycle_trace"] = build_cycle_trace(result)
         self.history.append({
             "cycle_id": result.get("cycle_id"),
             "action": result.get("decision", {}).get("action"),
             "executed": bool(result.get("executed")),
             "outcome": result.get("outcome"),
             "applied_fields": sorted(patch),
+            "cycle_trace": result["cycle_trace"],
         })
         if len(self.history) > self.max_history:
             self.history = self.history[-self.max_history:]
-        result["applied_state_patch"] = patch
-        result["state_changed"] = before != self.state
-        result["cycle_trace"] = build_cycle_trace(result)
         self._persist()
         return result
 
@@ -117,6 +118,7 @@ class CortexAutonomyRuntime:
             "engine": "Cortex Autonomous Runtime",
             "version": "10.3",
             "state": dict(self.state),
+            "history": list(self.history[-self.max_history:]),
             "history_count": len(self.history),
             "registered_actions": self.loop.status()["registered_actions"],
             "memory_strategy": self._strategy_context(),
