@@ -23,6 +23,7 @@ class VoiceCEOTests(unittest.TestCase):
         self.voice.speech_to_text = None
         self.voice.text_to_speech = None
         self.voice.communication_path = "cortex_communications.json"
+        self.voice.approval_path = "test-cortex-approvals.json"
 
     def test_classifies_status(self):
         command = self.voice.classify("  Cortex, what is the business status?  ")
@@ -42,19 +43,26 @@ class VoiceCEOTests(unittest.TestCase):
         self.assertFalse(result["executed"])
         self.orchestrator.tick.assert_called_once_with(execute=False)
 
-    def test_pause_requires_governance(self):
-        result = self.voice.handle_transcript("pause cortex")
+    def test_pause_creates_guard_proposal_without_execution(self):
+        approval = {"id": "approval-123", "status": "pending"}
+        with patch("cortex_voice_ceo.CortexGuard.request", return_value=approval) as request:
+            result = self.voice.handle_transcript("pause cortex")
         self.assertTrue(result["ok"])
         self.assertFalse(result["executed"])
         self.assertTrue(result["requires_approval"])
         self.assertEqual(result["requested_action"], "scheduler.pause")
+        self.assertEqual(result["approval_id"], "approval-123")
+        request.assert_called_once()
 
-    def test_resume_requires_governance(self):
-        result = self.voice.handle_transcript("resume cortex")
+    def test_resume_creates_guard_proposal_without_execution(self):
+        approval = {"id": "approval-456", "status": "pending"}
+        with patch("cortex_voice_ceo.CortexGuard.request", return_value=approval):
+            result = self.voice.handle_transcript("resume cortex")
         self.assertTrue(result["ok"])
         self.assertFalse(result["executed"])
         self.assertTrue(result["requires_approval"])
         self.assertEqual(result["requested_action"], "scheduler.resume")
+        self.assertEqual(result["approval_id"], "approval-456")
 
     def test_unknown_request_never_executes(self):
         result = self.voice.handle_transcript("Send a message to every customer")
@@ -73,6 +81,7 @@ class VoiceCEOTests(unittest.TestCase):
         voice.speech_to_text = speech
         voice.text_to_speech = None
         voice.communication_path = "cortex_communications.json"
+        voice.approval_path = "test-cortex-approvals.json"
         result = voice.handle_audio(b"audio")
         self.assertTrue(result["ok"])
         speech.assert_called_once_with(b"audio")
@@ -89,7 +98,8 @@ class VoiceCEOTests(unittest.TestCase):
         serialized_calls = repr(recorder.call_args_list)
         self.assertNotIn(secret, serialized_calls)
         for call in recorder.call_args_list:
-            self.assertIn("transcript_chars", repr(call)) if call.kwargs.get("metadata") else None
+            if call.kwargs.get("metadata"):
+                self.assertIn("transcript_chars", call.kwargs["metadata"])
 
     def test_status_reports_v12_boundary(self):
         status = self.voice.status()
