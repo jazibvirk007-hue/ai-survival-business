@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from cortex_autonomous_growth_loop import AutonomousGrowthLoop
+from cortex_cycle_trace import build_cycle_trace
 from cortex_deep_memory import CortexDeepMemory
 from cortex_strategy_ceo import CortexStrategyCEO
 from cortex_v9_specialists import build_v9_loop
@@ -48,8 +49,6 @@ class CortexAutonomyRuntime:
         try:
             restored = load_runtime_state(state_path)
         except ValueError:
-            # Fail closed: corrupt persisted business state must never be replaced
-            # silently with caller-supplied initial state and then executed.
             self.persistence_status = "corrupt_state"
             raise
 
@@ -109,6 +108,7 @@ class CortexAutonomyRuntime:
             self.history = self.history[-self.max_history:]
         result["applied_state_patch"] = patch
         result["state_changed"] = before != self.state
+        result["cycle_trace"] = build_cycle_trace(result)
         self._persist()
         return result
 
