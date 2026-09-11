@@ -1,7 +1,7 @@
 """V9 specialist adapters for TJ Cortex.
 
 This module binds the V9 orchestration loop to the existing specialist engines.
-It deliberately separates *planning/preparation* from external execution:
+It deliberately separates planning/preparation from external execution:
 market research, product generation, prospect qualification, content drafts,
 and financial analysis may run locally; outbound/customer-facing actions remain
 Cortex Guard gated by the AutonomousGrowthLoop.
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional
 
+from cortex_acquisition_pipeline import CortexAcquisitionPipeline
 from cortex_agent_factory import CortexAgentFactory, AgentProductSpec
 from cortex_autonomous_growth_loop import AutonomousGrowthLoop
 from cortex_content_engine import CortexContentEngine
@@ -55,6 +56,7 @@ class CortexV9Specialists:
             raise TypeError("content must be CortexContentEngine")
         self.research = MarketResearch()
         self.prospecting = CortexProspecting()
+        self.acquisition = CortexAcquisitionPipeline(prospecting=self.prospecting)
         self.growth = CortexGrowth()
         self.profit = CortexProfit()
         self.retention = CortexRetention()
@@ -119,8 +121,7 @@ class CortexV9Specialists:
             },
         }
 
-    @staticmethod
-    def _find_prospects(state: Dict[str, Any]) -> Dict[str, Any]:
+    def _find_prospects(self, state: Dict[str, Any]) -> Dict[str, Any]:
         records = state.get("prospects")
         if records is None:
             return {
@@ -129,16 +130,28 @@ class CortexV9Specialists:
                 "reason": "No authorized prospect records were supplied; no customers are invented.",
                 "state_patch": {"qualified_prospects": 0},
             }
-        prospects = CortexProspecting.discover(_list(records, 50))
-        ranked = CortexProspecting.rank(prospects)
+        try:
+            plan = self.acquisition.plan(_list(records, 50), limit=20)
+        except (TypeError, ValueError):
+            return {
+                "success": False,
+                "observed": "prospect_discovery_rejected",
+                "reason": "prospect records failed acquisition-policy validation",
+                "state_patch": {"qualified_prospects": 0},
+            }
+        candidates = plan.get("candidates", [])
+        reviewed = plan.get("reviewed", [])
         return {
             "success": True,
             "observed": "prospect_discovery",
-            "count": len(ranked),
-            "ranked_prospects": ranked[:20],
+            "count": len(reviewed),
+            "eligible_count": len(candidates),
+            "ranked_prospects": reviewed[:20],
+            "acquisition_queue": candidates[:20],
             "state_patch": {
-                "prospect_records": ranked[:20],
-                "qualified_prospects": sum(1 for row in ranked if row.get("priority_score", 0) >= 60),
+                "prospect_records": reviewed[:20],
+                "qualified_prospects": len(candidates),
+                "qualified_records": candidates[:20],
             },
         }
 
@@ -179,8 +192,6 @@ class CortexV9Specialists:
         }
 
     def _follow_up(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        # The loop keeps this action Guard-gated. This handler prepares the next
-        # follow-up; it does not send anything and cannot claim a customer reply.
         drafts = _list(state.get("draft_records"), 20)
         return {
             "success": bool(drafts),
