@@ -1,3 +1,6 @@
+import json
+import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -44,8 +47,39 @@ class CortexAutonomyRuntimeTests(unittest.TestCase):
         runtime = CortexAutonomyRuntime({"market_researched": True, "verified_revenue": 10})
         snapshot = runtime.snapshot()
         self.assertEqual(snapshot["state"]["verified_revenue"], 10)
-        self.assertEqual(snapshot["version"], "9.1")
+        self.assertEqual(snapshot["version"], "10.2")
         self.assertIn("research_market", snapshot["registered_actions"])
+        self.assertTrue(snapshot["persistence"]["restart_safe"])
+
+    def test_runtime_restores_state_and_history_after_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "runtime.json")
+            first = CortexAutonomyRuntime(initial_state={"market_researched": True}, state_path=path)
+            first.history.append({"cycle_id": "cycle-1", "action": "research_market", "executed": False})
+            first._persist()
+
+            second = CortexAutonomyRuntime(initial_state={"market_researched": False}, state_path=path)
+            self.assertTrue(second.state["market_researched"])
+            self.assertEqual(len(second.history), 1)
+            self.assertEqual(second.persistence_status, "restored")
+
+    def test_corrupt_persistence_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "runtime.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("{not-json")
+            runtime = CortexAutonomyRuntime(initial_state={"market_researched": False}, state_path=path)
+            self.assertEqual(runtime.persistence_status, "corrupt_state")
+            self.assertFalse(runtime.state.get("market_researched", True))
+
+    def test_persisted_shape_is_bounded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "runtime.json")
+            runtime = CortexAutonomyRuntime(initial_state={"market_researched": True}, state_path=path)
+            runtime._persist()
+            with open(path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            self.assertEqual(set(data), {"state", "history"})
 
 
 if __name__ == "__main__":
