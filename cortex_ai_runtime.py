@@ -44,6 +44,13 @@ class CortexAIRuntime:
         self.timeout_seconds = float(timeout_seconds)
 
     @staticmethod
+    def _base_url(preset: AIProviderPreset) -> str:
+        """Resolve a provider endpoint; custom endpoints remain server-side config."""
+        if preset.provider_id == "custom_openai":
+            return os.getenv("CUSTOM_AI_BASE_URL", "").strip()
+        return preset.base_url.strip()
+
+    @staticmethod
     def _key(preset: AIProviderPreset) -> str:
         if not preset.auth_env:
             return ""
@@ -53,9 +60,10 @@ class CortexAIRuntime:
         return key
 
     def _request(self, preset: AIProviderPreset, path: str, *, method: str = "GET", payload: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
-        if not preset.base_url:
+        base_url = self._base_url(preset)
+        if not base_url:
             raise AIRuntimeError("provider base URL is not configured")
-        url = urljoin(preset.base_url.rstrip("/") + "/", path.lstrip("/"))
+        url = urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
         key = self._key(preset) if preset.auth_env else ""
         if preset.protocol in {"openai_compatible", "cohere"} and key:
@@ -93,7 +101,7 @@ class CortexAIRuntime:
             return self._ids(data, ("data",))
         if preset.protocol == "gemini":
             data = self._request(preset, "/models")
-            return [str(x["name"]).removeprefix("models/") for x in data.get("models", []) if isinstance(x, dict) and x.get("name")]
+            return [str(x["name"]).removeprefix("models/") for x in data.get("models", []) if isinstance(x, dict) and x.get("name")][:200]
         if preset.protocol == "cohere":
             data = self._request(preset, "/models")
             return self._ids(data, ("models", "data"))
@@ -120,12 +128,7 @@ class CortexAIRuntime:
         preset = get_provider(selection.provider_id)
         if preset.protocol == "anthropic":
             system = "\n".join(str(m.get("content", "")) for m in messages if m.get("role") == "system")
-            body = {
-                "model": selection.model,
-                "max_tokens": 2048,
-                "temperature": float(temperature),
-                "messages": [dict(m) for m in messages if m.get("role") != "system"],
-            }
+            body = {"model": selection.model, "max_tokens": 2048, "temperature": float(temperature), "messages": [dict(m) for m in messages if m.get("role") != "system"]}
             if system:
                 body["system"] = system
             data = self._request(preset, "/messages", method="POST", payload=body)
@@ -151,12 +154,7 @@ class CortexAIRuntime:
                 return str(data["message"]["content"][0]["text"])
             except (KeyError, IndexError, TypeError) as exc:
                 raise AIRuntimeError("Cohere returned no assistant text") from exc
-        data = self._request(
-            preset,
-            "/chat/completions",
-            method="POST",
-            payload={"model": selection.model, "messages": [dict(m) for m in messages], "temperature": float(temperature)},
-        )
+        data = self._request(preset, "/chat/completions", method="POST", payload={"model": selection.model, "messages": [dict(m) for m in messages], "temperature": float(temperature)})
         try:
             return str(data["choices"][0]["message"]["content"])
         except (KeyError, IndexError, TypeError) as exc:
@@ -165,11 +163,4 @@ class CortexAIRuntime:
     def status(self, selection: AISelection) -> dict[str, Any]:
         """Return UI-safe configuration only; never return credential values."""
         preset = get_provider(selection.provider_id)
-        return {
-            "provider_id": preset.provider_id,
-            "provider": preset.name,
-            "protocol": preset.protocol,
-            "model": selection.model,
-            "configured": bool(not preset.auth_env or os.getenv(preset.auth_env, "").strip()),
-            "credential_env": preset.auth_env,
-        }
+        return {"provider_id": preset.provider_id, "provider": preset.name, "protocol": preset.protocol, "model": selection.model, "configured": bool(self._base_url(preset) and (not preset.auth_env or os.getenv(preset.auth_env, "").strip())), "credential_env": preset.auth_env}
