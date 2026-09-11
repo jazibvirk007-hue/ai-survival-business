@@ -2,8 +2,9 @@
 
 This module intentionally contains no business execution logic. It composes
 existing governed components into one bounded snapshot for the dashboard:
-AI provider selection/health, recent inter-agent communications, and runtime
-health. Secrets and raw credentials are never exposed.
+AI provider selection/health, recent inter-agent communications, runtime
+health, and persistent scheduler state. Secrets and raw credentials are never
+exposed.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from cortex_ai_command import CortexAICommand
 from cortex_ai_health import build_ai_health
 from cortex_communication import communication_status, recent_messages
 from cortex_autonomy_health import evaluate_runtime_health
+from cortex_scheduler_service import CortexSchedulerService
 
 MAX_EVENTS = 50
 MAX_ERROR_TEXT = 500
@@ -28,6 +30,7 @@ def build_command_center_snapshot(
     *,
     command: Optional[CortexAICommand] = None,
     runtime_snapshot: Optional[dict[str, Any]] = None,
+    scheduler: Optional[CortexSchedulerService] = None,
     event_limit: int = MAX_EVENTS,
 ) -> dict[str, Any]:
     """Return a bounded snapshot suitable for direct browser consumption."""
@@ -60,9 +63,15 @@ def build_command_center_snapshot(
         except Exception as exc:
             runtime_health = {"status": "INVALID_SNAPSHOT", "error": _safe_error(exc)}
 
+    scheduler_snapshot = None
+    try:
+        scheduler_snapshot = (scheduler or CortexSchedulerService()).snapshot()
+    except Exception as exc:
+        scheduler_snapshot = {"status": "DEGRADED", "error": _safe_error(exc)}
+
     return {
         "engine": "Cortex Command Center",
-        "version": "9.3.1",
+        "version": "9.5.0",
         "ai": {
             "catalog": catalog,
             "selected": selected,
@@ -70,9 +79,11 @@ def build_command_center_snapshot(
         },
         "communications": communication,
         "runtime_health": runtime_health,
+        "scheduler": scheduler_snapshot,
         "truth_policy": {
             "revenue": "verified observations only",
             "credentials": "server-side only",
             "execution": "governed",
+            "scheduler": "bounded and safety-pausable",
         },
     }
