@@ -108,6 +108,36 @@
     }
     frame(t){this.background(t);this.edgesDraw();this.packetsDraw(t);this.nodesDraw();requestAnimationFrame(x=>this.frame(x));}
   }
-  function init(){const root=document.querySelector("[data-neural-network]");if(root&&window.ResizeObserver)new NeuralNetwork(root);}
+
+  const api = async (url, options={}) => {
+    const r=await fetch(url,{cache:"no-store",...options});
+    let body={}; try{body=await r.json();}catch(_){ }
+    if(!r.ok) throw new Error(body.error||"request_failed");
+    return body;
+  };
+  const post = (url,payload={}) => api(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+
+  function mountControls(){
+    const surface=[...document.querySelectorAll(".card")].find(el=>el.querySelector(".label")?.textContent?.trim()==="Command Surface");
+    if(!surface||surface.dataset.cortexControls==="1")return;
+    const controls=surface.querySelector(".controls"); if(!controls)return;
+    surface.dataset.cortexControls="1";
+    controls.innerHTML='<button class="btn" data-cortex="observe">OBSERVE</button><button class="btn" data-cortex="tick">RUN ONE CYCLE</button><button class="btn" data-cortex="pause">PAUSE</button><button class="btn" data-cortex="resume">RESUME</button>';
+    const output=document.createElement("div");output.className="muted";output.dataset.cortexControlOutput="1";output.textContent="Live controls ready — external actions remain Guard-gated.";surface.appendChild(output);
+    const setBusy=b=>controls.querySelectorAll("button").forEach(x=>x.disabled=b);
+    controls.addEventListener("click",async e=>{
+      const b=e.target.closest("button[data-cortex]");if(!b)return;const action=b.dataset.cortex;setBusy(true);
+      try{
+        if(action==="observe"){const r=await api("/api/command-center/live");const s=r.command_center?.scheduler||{};output.textContent=`CORTEX: scheduler ${s.paused?"PAUSED":"READY"}; cycles ${s.cycles_completed??0}`;}
+        else if(action==="pause"){await post("/api/scheduler/pause");output.textContent="CORTEX: scheduler paused — autonomous ticks blocked";}
+        else if(action==="resume"){await post("/api/scheduler/resume");output.textContent="CORTEX: scheduler resumed — bounded cycles available";}
+        else if(action==="tick"){const r=await post("/api/scheduler/tick",{execute:false});output.textContent=r.ok?"CORTEX: governed observation cycle completed":`CORTEX: ${r.error||"cycle blocked"}`;}
+        window.dispatchEvent(new CustomEvent("cortex:control-updated"));
+      }catch(err){output.textContent=`CORTEX: ${err.message||"control request failed"}`;}
+      finally{setBusy(false);}
+    });
+  }
+
+  function init(){const root=document.querySelector("[data-neural-network]");if(root&&window.ResizeObserver)new NeuralNetwork(root);mountControls();}
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);else init();
 })();
