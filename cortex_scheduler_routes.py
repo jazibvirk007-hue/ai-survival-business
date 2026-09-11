@@ -8,7 +8,14 @@ from cortex_scheduler_service import CortexSchedulerService
 
 MAX_BODY_KEYS = 10
 MAX_APPROVAL_ID = 200
-_DEFAULT_SERVICE = CortexSchedulerService()
+_DEFAULT_SERVICE: Optional[CortexSchedulerService] = None
+
+
+def _service() -> CortexSchedulerService:
+    global _DEFAULT_SERVICE
+    if _DEFAULT_SERVICE is None:
+        _DEFAULT_SERVICE = CortexSchedulerService()
+    return _DEFAULT_SERVICE
 
 
 def _error(code: str) -> tuple[int, dict[str, Any]]:
@@ -25,7 +32,7 @@ def dispatch_scheduler_route(
     """Dispatch bounded scheduler controls without exposing secrets."""
     method = str(method).upper()
     payload = payload or {}
-    service = service or _DEFAULT_SERVICE
+    service = service or _service()
 
     if method == "GET" and path == "/api/scheduler":
         return 200, {"ok": True, "scheduler": service.snapshot()}
