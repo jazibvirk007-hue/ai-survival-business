@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from cortex_autonomous_growth_loop import AutonomousGrowthLoop
 from cortex_deep_memory import CortexDeepMemory
+from cortex_strategy_ceo import CortexStrategyCEO
 from cortex_v9_specialists import build_v9_loop
 
 PATCHABLE_FIELDS = frozenset({
@@ -15,12 +16,13 @@ PATCHABLE_FIELDS = frozenset({
 MAX_HISTORY = 200
 
 class CortexAutonomyRuntime:
-    """Persist bounded observations and provide observed-learning context to each CEO cycle."""
+    """Persist bounded observations and use observed learning in CEO ranking."""
     def __init__(self, initial_state: Optional[Dict[str, Any]] = None, *, loop: Optional[AutonomousGrowthLoop] = None, max_history: int = MAX_HISTORY) -> None:
         if initial_state is not None and not isinstance(initial_state, dict): raise TypeError("initial_state must be a dictionary")
         if loop is not None and not isinstance(loop, AutonomousGrowthLoop): raise TypeError("loop must be AutonomousGrowthLoop")
         if not isinstance(max_history, int) or isinstance(max_history, bool) or not 1 <= max_history <= 1000: raise ValueError("max_history must be between 1 and 1000")
         self.loop = loop if loop is not None else build_v9_loop()
+        self.loop.ceo = CortexStrategyCEO(self.loop.ceo)
         self.state: Dict[str, Any] = dict(initial_state or {})
         self.history: List[Dict[str, Any]] = []
         self.max_history = max_history
@@ -62,10 +64,11 @@ class CortexAutonomyRuntime:
     def snapshot(self) -> Dict[str, Any]:
         return {
             "engine": "Cortex Autonomous Runtime",
-            "version": "10.0",
+            "version": "10.1",
             "state": dict(self.state),
             "history_count": len(self.history),
             "registered_actions": self.loop.status()["registered_actions"],
             "memory_strategy": self._strategy_context(),
+            "learning_policy": "bounded observed outcomes influence ranking only",
             "truth_policy": "verified financial observations are immutable; memory is advisory only",
         }
