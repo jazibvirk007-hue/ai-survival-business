@@ -97,9 +97,9 @@ class VoiceCEOTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         serialized_calls = repr(recorder.call_args_list)
         self.assertNotIn(secret, serialized_calls)
-        for call in recorder.call_args_list:
-            if call.kwargs.get("metadata"):
-                self.assertIn("transcript_chars", call.kwargs["metadata"])
+        self.assertEqual(recorder.call_count, 2)
+        self.assertIn("transcript_chars", recorder.call_args_list[0].kwargs["metadata"])
+        self.assertNotIn("transcript", recorder.call_args_list[0].kwargs["metadata"])
 
     def test_status_reports_v12_boundary(self):
         status = self.voice.status()
