@@ -57,7 +57,9 @@ class CortexAutonomyRuntime:
 
         persisted_state = restored.get("state") if isinstance(restored.get("state"), dict) else {}
         persisted_history = restored.get("history") if isinstance(restored.get("history"), list) else []
-        self.state: Dict[str, Any] = dict(persisted_state or initial_state or {})
+        merged_state: Dict[str, Any] = dict(initial_state or {})
+        merged_state.update(persisted_state)
+        self.state = merged_state
         self.history: List[Dict[str, Any]] = list(persisted_history)[-self.max_history:]
         self.deep_memory = CortexDeepMemory(self.loop.learning.memory)
 
