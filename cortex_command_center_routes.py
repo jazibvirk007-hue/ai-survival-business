@@ -11,6 +11,8 @@ from typing import Any, Optional
 from cortex_ai_command import CortexAICommand
 from cortex_command_center import build_command_center_snapshot
 from cortex_command_center_actions import select_provider, test_provider
+from cortex_scheduler_routes import dispatch_scheduler_route
+from cortex_scheduler_service import CortexSchedulerService
 
 MAX_BODY_KEYS = 20
 
@@ -26,13 +28,21 @@ def dispatch_command_center_route(
     payload: Optional[dict[str, Any]] = None,
     command: Optional[CortexAICommand] = None,
     runtime_snapshot: Optional[dict[str, Any]] = None,
+    scheduler: Optional[CortexSchedulerService] = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Dispatch supported Command Center API routes without exposing secrets."""
+    """Dispatch supported Command Center and scheduler routes safely."""
     method = str(method).upper()
     payload = payload or {}
 
+    if path.startswith("/api/scheduler"):
+        return dispatch_scheduler_route(method, path, payload=payload, service=scheduler)
+
     if method == "GET" and path == "/api/command-center":
-        return 200, build_command_center_snapshot(command=command, runtime_snapshot=runtime_snapshot)
+        return 200, build_command_center_snapshot(
+            command=command,
+            runtime_snapshot=runtime_snapshot,
+            scheduler=scheduler,
+        )
 
     if method == "GET" and path == "/api/ai/catalog":
         return 200, {"ok": True, "catalog": (command or CortexAICommand()).catalog()}
