@@ -16,10 +16,12 @@ import uuid
 from typing import Any, Callable, Optional
 
 from cortex_communication import record_message
+from cortex_guard import CortexGuard
 from cortex_v95_orchestrator import CortexV95Orchestrator
 
 MAX_TRANSCRIPT = 4000
 MAX_RESPONSE = 2000
+DEFAULT_APPROVAL_PATH = "cortex_approvals.json"
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,7 @@ class CortexVoiceCEO:
         speech_to_text: Optional[Callable[[Any], str]] = None,
         text_to_speech: Optional[Callable[[str], Any]] = None,
         communication_path: str = "cortex_communications.json",
+        approval_path: str = DEFAULT_APPROVAL_PATH,
     ) -> None:
         if not isinstance(orchestrator, CortexV95Orchestrator):
             raise TypeError("orchestrator must be CortexV95Orchestrator")
@@ -49,10 +52,13 @@ class CortexVoiceCEO:
             raise TypeError("text_to_speech must be callable")
         if not isinstance(communication_path, str) or not communication_path.strip():
             raise ValueError("communication_path is required")
+        if not isinstance(approval_path, str) or not approval_path.strip():
+            raise ValueError("approval_path is required")
         self.orchestrator = orchestrator
         self.speech_to_text = speech_to_text
         self.text_to_speech = text_to_speech
         self.communication_path = communication_path
+        self.approval_path = approval_path
 
     @staticmethod
     def normalize_transcript(transcript: str) -> str:
@@ -108,6 +114,15 @@ class CortexVoiceCEO:
         except Exception:
             pass
 
+    def _request_guard_approval(self, action: str, reason: str) -> dict[str, Any]:
+        """Create a durable Guard proposal without executing the requested action."""
+        try:
+            approval = CortexGuard(path=self.approval_path).request(action, reason)
+            return {"approval_id": approval["id"], "approval_status": approval["status"]}
+        except Exception:
+            # A broken approval store must never turn into implicit execution.
+            return {"approval_id": None, "approval_status": "unavailable"}
+
     def handle_transcript(self, transcript: str) -> dict[str, Any]:
         command = self.classify(transcript)
         correlation = self._correlation_id()
@@ -127,17 +142,25 @@ class CortexVoiceCEO:
             response = "I ran one bounded Cortex decision cycle in observation mode. No external action was executed."
             result = {"ok": True, "command": command.__dict__, "response": response, "executed": False, "cycle": cycle_result["cycle"], "runtime": cycle_result["runtime"]}
         elif command.intent in {"pause", "resume"}:
-            # Scheduler control is an authorization-sensitive action. The voice
-            # edge may request it, but cannot directly mutate scheduler state.
             action = "pause" if command.intent == "pause" else "resume"
-            response = f"A scheduler {action} was requested, but Voice CEO cannot execute that control directly. Approval through Cortex Guard is required."
+            requested_action = f"scheduler.{action}"
+            approval = self._request_guard_approval(
+                requested_action,
+                f"Voice CEO requested scheduler {action}; execution requires explicit Cortex Guard approval.",
+            )
+            if approval["approval_id"]:
+                response = f"Scheduler {action} was proposed to Cortex Guard. Approval {approval['approval_id']} is required before execution."
+            else:
+                response = f"Scheduler {action} was not executed. Cortex Guard approval storage is unavailable, so the request remains blocked."
             result = {
                 "ok": True,
                 "command": command.__dict__,
                 "response": response,
                 "executed": False,
                 "requires_approval": True,
-                "requested_action": f"scheduler.{action}",
+                "requested_action": requested_action,
+                "approval_id": approval["approval_id"],
+                "approval_status": approval["approval_status"],
                 "governance": "Cortex Guard",
             }
         else:
