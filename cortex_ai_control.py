@@ -71,8 +71,15 @@ def save_selection(selection: AIControlSelection, path: os.PathLike[str] | str =
 
 
 def safe_provider_catalog() -> list[dict[str, Any]]:
-    """Return provider metadata safe for browser consumption."""
-    return providers()
+    """Return only browser-safe provider metadata; omit credential env names."""
+    return [
+        {
+            key: value
+            for key, value in item.items()
+            if key != "auth_env"
+        }
+        for item in providers()
+    ]
 
 
 def safe_selection_status(runtime: CortexAIRuntime, path: os.PathLike[str] | str = DEFAULT_PATH) -> dict[str, Any]:
