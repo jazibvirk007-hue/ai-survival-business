@@ -102,6 +102,7 @@ class AICEO:
         market_age_default = 0 if state.get("market_researched", False) else 9999
         market_age = max(0.0, self._number(state, "market_research_age_hours", market_age_default))
         recent_failure = bool(state.get("recent_action_failed", False))
+        margin = self._number(state, "gross_margin", -1.0)
 
         candidates: List[Decision] = []
         if recent_failure:
@@ -110,6 +111,8 @@ class AICEO:
             candidates.append(Decision("research_market", 90, "Market evidence is missing or stale.", "Refresh opportunity signals before spending effort on acquisition."))
         if state.get("market_researched", False) and products == 0:
             candidates.append(Decision("create_product", 88, "A market opportunity exists but no sellable offer is ready.", "Create one concrete offer before prospecting."))
+        if revenue > 0 and 0 <= margin < 0.50:
+            candidates.append(Decision("improve_offer", 86, "Observed gross margin is below the 50% operating target.", "Improve pricing, packaging, delivery cost, or offer economics before scaling acquisition."))
         if products > 0 and prospects == 0:
             candidates.append(Decision("find_prospects", 84, "A product exists but there are no qualified prospects.", "Build a real prospect pool without inventing customers."))
         if prospects > 0 and drafts == 0:
