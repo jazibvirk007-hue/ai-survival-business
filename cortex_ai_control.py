@@ -73,11 +73,7 @@ def save_selection(selection: AIControlSelection, path: os.PathLike[str] | str =
 def safe_provider_catalog() -> list[dict[str, Any]]:
     """Return only browser-safe provider metadata; omit credential env names."""
     return [
-        {
-            key: value
-            for key, value in item.items()
-            if key != "auth_env"
-        }
+        {key: value for key, value in item.items() if key != "auth_env"}
         for item in providers()
     ]
 
@@ -96,3 +92,26 @@ def discover_models(runtime: CortexAIRuntime, provider_id: str) -> list[str]:
     """Discover live models; credentials are resolved only by the server runtime."""
     get_provider(provider_id)
     return runtime.discover_models(provider_id)
+
+
+def test_selection(runtime: CortexAIRuntime, selection: AIControlSelection) -> dict[str, Any]:
+    """Validate a selection and perform a provider-level connectivity/model check."""
+    validated = _validate(selection.provider_id, selection.model)
+    try:
+        models = runtime.discover_models(validated.provider_id)
+        return {
+            "ok": True,
+            "provider_id": validated.provider_id,
+            "model": validated.model,
+            "model_known": validated.model in models if models else None,
+            "models_available": len(models),
+        }
+    except Exception as error:
+        return {
+            "ok": False,
+            "provider_id": validated.provider_id,
+            "model": validated.model,
+            "model_known": False,
+            "models_available": 0,
+            "error": type(error).__name__,
+        }
