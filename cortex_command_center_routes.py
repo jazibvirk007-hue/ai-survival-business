@@ -34,15 +34,13 @@ def dispatch_command_center_route(
     if path.startswith("/api/scheduler"):
         return dispatch_scheduler_route(method, path, payload=payload, service=scheduler)
 
-    if method == "GET" and path == "/api/cycles":
+    if method == "GET" and path.split("?", 1)[0] == "/api/cycles":
+        if runtime_snapshot is None:
+            return 503, {"ok": False, "error": "runtime_snapshot_unavailable"}
         return dispatch_cycle_history_route(method, path, runtime_snapshot=runtime_snapshot)
 
     if method == "GET" and path == "/api/command-center":
-        return 200, build_command_center_snapshot(
-            command=command,
-            runtime_snapshot=runtime_snapshot,
-            scheduler=scheduler,
-        )
+        return 200, build_command_center_snapshot(command=command, runtime_snapshot=runtime_snapshot, scheduler=scheduler)
 
     if method == "GET" and path == "/api/ai/catalog":
         return 200, {"ok": True, "catalog": (command or CortexAICommand()).catalog()}
