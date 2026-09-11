@@ -45,14 +45,16 @@ class CortexAutonomyRuntime:
         self.state_path = state_path
         self.persistence_status = "fresh"
 
-        restored: Dict[str, Any] = {}
         try:
             restored = load_runtime_state(state_path)
-            if restored:
-                self.persistence_status = "restored"
         except ValueError:
-            # Fail closed: never execute from corrupt persisted business state.
+            # Fail closed: corrupt persisted business state must never be replaced
+            # silently with caller-supplied initial state and then executed.
             self.persistence_status = "corrupt_state"
+            raise
+
+        if restored:
+            self.persistence_status = "restored"
 
         persisted_state = restored.get("state") if isinstance(restored.get("state"), dict) else {}
         persisted_history = restored.get("history") if isinstance(restored.get("history"), list) else []
@@ -113,7 +115,7 @@ class CortexAutonomyRuntime:
     def snapshot(self) -> Dict[str, Any]:
         return {
             "engine": "Cortex Autonomous Runtime",
-            "version": "10.2",
+            "version": "10.3",
             "state": dict(self.state),
             "history_count": len(self.history),
             "registered_actions": self.loop.status()["registered_actions"],
@@ -122,6 +124,7 @@ class CortexAutonomyRuntime:
                 "status": self.persistence_status,
                 "state_path": self.state_path,
                 "restart_safe": True,
+                "corrupt_state_policy": "fail_closed",
             },
             "learning_policy": "bounded observed outcomes influence ranking only",
             "truth_policy": "verified financial observations are immutable; memory is advisory only",
