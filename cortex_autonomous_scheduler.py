@@ -71,8 +71,14 @@ class CortexAutonomousScheduler:
         self.last_tick_at = datetime.now(timezone.utc).isoformat()
         self.last_result = result
 
-        outcome = result.get("outcome") or {}
-        failed = bool(outcome.get("failed"))
+        outcome = result.get("outcome") if isinstance(result, dict) else None
+        # V9.5 wraps the runtime result under ``cycle``. Accept both shapes so
+        # scheduler failure recovery remains correct across integration layers.
+        if not isinstance(outcome, dict) and isinstance(result, dict):
+            cycle = result.get("cycle")
+            if isinstance(cycle, dict):
+                outcome = cycle.get("outcome")
+        failed = bool(outcome.get("failed")) if isinstance(outcome, dict) else False
         if failed:
             self.consecutive_failures += 1
         else:
