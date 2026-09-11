@@ -1,353 +1,113 @@
-/* TJ Cortex Neural Network
- * Real-time visualization of the Cortex communication bus.
- * No synthetic business messages are generated here: packets are spawned only
- * from events returned by /api/communications.
- */
+/* TJ Cortex Neural Network — real communication events only. */
 (() => {
   "use strict";
 
-  const NODE_LAYOUT = {
-    CEO: [0.50, 0.50],
-    Intelligence: [0.50, 0.15],
-    Product: [0.72, 0.24],
-    "Agent Factory": [0.86, 0.50],
-    Growth: [0.72, 0.76],
-    Communications: [0.50, 0.85],
-    Commerce: [0.28, 0.76],
-    Finance: [0.14, 0.50],
-    Guard: [0.28, 0.24],
-    Memory: [0.50, 0.33]
+  const LAYOUT = {
+    CEO:[.50,.50], Intelligence:[.50,.14], Product:[.72,.24], "Agent Factory":[.86,.50],
+    Growth:[.72,.76], Communications:[.50,.86], Commerce:[.28,.76], Finance:[.14,.50],
+    Guard:[.28,.24], Memory:[.50,.33]
   };
-
-  const NODE_ALIASES = {
-    ceo: "CEO",
-    cortex: "CEO",
-    "cortex ceo": "CEO",
-    intelligence: "Intelligence",
-    research: "Intelligence",
-    "cortex intelligence": "Intelligence",
-    product: "Product",
-    "product agent": "Product",
-    "agent factory": "Agent Factory",
-    agents: "Agent Factory",
-    growth: "Growth",
-    prospecting: "Growth",
-    "cortex growth": "Growth",
-    communications: "Communications",
-    communication: "Communications",
-    commerce: "Commerce",
-    orders: "Commerce",
-    finance: "Finance",
-    guard: "Guard",
-    "cortex guard": "Guard",
-    memory: "Memory",
-    "cortex memory": "Memory"
+  const ALIASES = {
+    ceo:"CEO", cortex:"CEO", "cortex ceo":"CEO", research:"Intelligence", intelligence:"Intelligence",
+    "cortex intelligence":"Intelligence", product:"Product", "product agent":"Product",
+    agents:"Agent Factory", "agent factory":"Agent Factory", growth:"Growth", prospecting:"Growth",
+    "cortex growth":"Growth", communications:"Communications", communication:"Communications",
+    commerce:"Commerce", orders:"Commerce", finance:"Finance", guard:"Guard", "cortex guard":"Guard",
+    memory:"Memory", "cortex memory":"Memory"
   };
-
-  const NODE_COLORS = {
-    CEO: "#39e7ff",
-    Intelligence: "#6ca8ff",
-    Product: "#a56cff",
-    "Agent Factory": "#ff6cd9",
-    Growth: "#52f2a3",
-    Communications: "#ffd166",
-    Commerce: "#55d6be",
-    Finance: "#7ce7ff",
-    Guard: "#ff7f7f",
-    Memory: "#c18cff"
+  const COLORS = {
+    CEO:"#39e7ff", Intelligence:"#6ca8ff", Product:"#a56cff", "Agent Factory":"#ff6cd9",
+    Growth:"#52f2a3", Communications:"#ffd166", Commerce:"#55d6be", Finance:"#7ce7ff",
+    Guard:"#ff7f7f", Memory:"#c18cff"
   };
+  const MAX_EVENTS = 120;
+  const text = (v, fallback="?") => (v === null || v === undefined || v === "" ? fallback : String(v).slice(0,500));
+  const agent = v => {
+    if (typeof v !== "string") return null;
+    const k = v.trim().toLowerCase();
+    return ALIASES[k] || (Object.prototype.hasOwnProperty.call(LAYOUT,v) ? v : null);
+  };
+  const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
 
-  function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
-  }
-
-  function normalizeAgent(value) {
-    if (typeof value !== "string") return null;
-    const key = value.trim().toLowerCase();
-    return NODE_ALIASES[key] || (Object.prototype.hasOwnProperty.call(NODE_LAYOUT, value) ? value : null);
-  }
-
-  function safeText(value, fallback) {
-    if (value === null || value === undefined || value === "") return fallback;
-    return String(value).slice(0, 500);
-  }
-
-  class CortexNeuralNetwork {
+  class NeuralNetwork {
     constructor(root) {
-      this.root = root;
-      this.canvas = root.querySelector("canvas");
-      this.ctx = this.canvas.getContext("2d");
-      this.inspector = root.querySelector("[data-neural-inspector]");
-      this.eventCount = root.querySelector("[data-neural-count]");
-      this.status = root.querySelector("[data-neural-status]");
-      this.lastEvent = root.querySelector("[data-neural-last]");
-      this.nodes = Object.keys(NODE_LAYOUT).map((name) => ({
-        name,
-        x: NODE_LAYOUT[name][0],
-        y: NODE_LAYOUT[name][1],
-        glow: 0,
-        hover: false
-      }));
-      this.edges = [];
-      this.packets = [];
-      this.events = [];
-      this.seen = new Set();
-      this.particles = Array.from({ length: 36 }, (_, index) => ({
-        x: (index * 0.137) % 1,
-        y: (index * 0.271) % 1,
-        speed: 0.00004 + (index % 7) * 0.000012,
-        phase: index * 1.71
-      }));
-      this.running = true;
-      this.reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      this.resizeObserver = new ResizeObserver(() => this.resize());
-      this.resizeObserver.observe(this.root);
-      this.canvas.addEventListener("click", (event) => this.inspectAt(event));
-      this.canvas.addEventListener("mousemove", (event) => this.hoverAt(event));
-      this.resize();
-      this.fetchLoop();
-      requestAnimationFrame((time) => this.frame(time));
+      this.root=root;
+      this.canvas=root.querySelector("canvas");
+      this.ctx=this.canvas.getContext("2d");
+      this.status=root.querySelector("[data-neural-status]");
+      this.count=root.querySelector("[data-neural-count]");
+      this.inspector=root.querySelector("[data-neural-inspector]");
+      this.nodes=Object.keys(LAYOUT).map(name=>({name,x:LAYOUT[name][0],y:LAYOUT[name][1],glow:0,hover:false}));
+      this.events=[]; this.seen=new Set(); this.packets=[]; this.edges=[];
+      this.reduced=window.matchMedia?.("(prefers-reduced-motion: reduce)").matches || false;
+      this.resizeObserver=new ResizeObserver(()=>this.resize());
+      this.resizeObserver.observe(root);
+      this.canvas.addEventListener("mousemove",e=>this.hover(e));
+      this.canvas.addEventListener("click",e=>this.inspect(e));
+      this.resize(); this.poll(); requestAnimationFrame(t=>this.frame(t));
     }
-
-    resize() {
-      const rect = this.canvas.getBoundingClientRect();
-      const ratio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-      this.canvas.width = Math.max(1, Math.floor(rect.width * ratio));
-      this.canvas.height = Math.max(1, Math.floor(rect.height * ratio));
-      this.ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-      this.width = rect.width;
-      this.height = rect.height;
+    resize(){
+      const r=this.canvas.getBoundingClientRect(), d=Math.max(1,Math.min(2,devicePixelRatio||1));
+      this.canvas.width=Math.max(1,Math.floor(r.width*d)); this.canvas.height=Math.max(1,Math.floor(r.height*d));
+      this.ctx.setTransform(d,0,0,d,0,0); this.width=r.width; this.height=r.height;
     }
-
-    point(node) {
-      return { x: node.x * this.width, y: node.y * this.height };
+    point(n){return{x:n.x*this.width,y:n.y*this.height};}
+    rebuildEdges(){
+      const pairs=new Set();
+      for(const e of this.events){const a=agent(e.sender),b=agent(e.recipient);if(a&&b&&a!==b)pairs.add([a,b].sort().join("|"));}
+      this.edges=[...pairs].map(k=>{const [a,b]=k.split("|");return{a,b,pulse:0};});
     }
-
-    buildEdges() {
-      const names = Object.keys(NODE_LAYOUT);
-      const desired = new Set();
-      for (const event of this.events) {
-        const sender = normalizeAgent(event.sender);
-        const recipient = normalizeAgent(event.recipient);
-        if (!sender || !recipient || sender === recipient) continue;
-        const key = [sender, recipient].sort().join("|");
-        desired.add(key);
+    ingest(list,live){
+      if(!Array.isArray(list)) return;
+      for(const e of [...list].reverse()){
+        const id=text(e.id||e.event_id||`${e.timestamp}|${e.sender}|${e.recipient}|${e.summary}`,"event");
+        if(this.seen.has(id)) continue;
+        this.seen.add(id); this.events.push(e); if(this.events.length>MAX_EVENTS)this.events.shift();
+        const a=agent(e.sender),b=agent(e.recipient);
+        if(a&&b&&a!==b){this.packets.push({a,b,start:performance.now(),duration:this.reduced?1:950+Math.random()*500,status:text(e.status,"sent")});}
       }
-      for (const left of names) {
-        for (const right of names) {
-          if (left >= right) continue;
-          const key = [left, right].sort().join("|");
-          if (desired.has(key)) continue;
-        }
-      }
-      this.edges = Array.from(desired).map((key) => {
-        const [a, b] = key.split("|");
-        return { a, b, strength: 0.18, pulse: 0 };
-      });
+      this.rebuildEdges();
+      if(this.count)this.count.textContent=`${this.events.length} observed events`;
+      if(this.status)this.status.textContent=live?"LIVE BUS":"BUS IDLE";
     }
-
-    spawnPacket(event) {
-      const sender = normalizeAgent(event.sender);
-      const recipient = normalizeAgent(event.recipient);
-      if (!sender || !recipient || sender === recipient) return;
-      this.packets.push({
-        sender,
-        recipient,
-        start: performance.now(),
-        duration: this.reducedMotion ? 1 : 900 + Math.random() * 650,
-        status: safeText(event.status, "sent")
-      });
-      const senderNode = this.nodes.find((node) => node.name === sender);
-      const recipientNode = this.nodes.find((node) => node.name === recipient);
-      if (senderNode) senderNode.glow = 1;
-      if (recipientNode) recipientNode.glow = 1;
+    async poll(){
+      try{const r=await fetch("/api/communications?limit=50",{cache:"no-store"});if(!r.ok)throw new Error();const p=await r.json();this.ingest(p.events,Boolean(p.stream?.live_stream_ready));}
+      catch(_){if(this.status)this.status.textContent="BUS UNAVAILABLE";}
+      finally{setTimeout(()=>this.poll(),1500);}
     }
-
-    ingest(events, streamReady) {
-      if (!Array.isArray(events)) return;
-      const ordered = [...events].reverse();
-      for (const event of ordered) {
-        const id = safeText(event.event_id || event.id || event.correlation_id || `${event.timestamp}|${event.sender}|${event.recipient}|${event.summary}`, "event");
-        if (this.seen.has(id)) continue;
-        this.seen.add(id);
-        this.events.push(event);
-        if (this.events.length > 120) this.events.shift();
-        this.spawnPacket(event);
-      }
-      this.buildEdges();
-      this.eventCount.textContent = `${this.events.length} observed events`;
-      this.status.textContent = streamReady ? "LIVE BUS" : "BUS IDLE";
-      if (this.events.length) {
-        const event = this.events[this.events.length - 1];
-        this.lastEvent.textContent = `${safeText(event.sender, "?")} → ${safeText(event.recipient, "?")}`;
+    background(t){
+      const c=this.ctx;c.clearRect(0,0,this.width,this.height);
+      const g=c.createRadialGradient(this.width*.5,this.height*.5,10,this.width*.5,this.height*.5,Math.max(this.width,this.height)*.7);
+      g.addColorStop(0,"rgba(22,38,74,.42)");g.addColorStop(.55,"rgba(7,13,29,.62)");g.addColorStop(1,"rgba(3,6,15,.96)");c.fillStyle=g;c.fillRect(0,0,this.width,this.height);
+      if(!this.reduced){for(let i=0;i<28;i++){const x=((i*97)%1000)/1000*this.width,y=((i*173+t*.01)%1000)/1000*this.height;c.fillStyle="rgba(93,177,255,.16)";c.fillRect(x,y,1.2,1.2);}}
+    }
+    edgesDraw(){
+      const c=this.ctx;
+      for(const e of this.edges){const a=this.nodes.find(n=>n.name===e.a),b=this.nodes.find(n=>n.name===e.b);if(!a||!b)continue;const p=this.point(a),q=this.point(b);
+        c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.strokeStyle=`rgba(72,141,210,${.18+e.pulse*.4})`;c.lineWidth=1+e.pulse;c.stroke();
       }
     }
-
-    async fetchLoop() {
-      try {
-        const response = await fetch("/api/communications?limit=50", { cache: "no-store" });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const payload = await response.json();
-        this.ingest(payload.events, Boolean(payload.stream && payload.stream.live_stream_ready));
-      } catch (error) {
-        this.status.textContent = "BUS UNAVAILABLE";
-      } finally {
-        window.setTimeout(() => this.fetchLoop(), 1500);
+    packetsDraw(now){
+      const c=this.ctx,keep=[];
+      for(const p of this.packets){const a=this.nodes.find(n=>n.name===p.a),b=this.nodes.find(n=>n.name===p.b);if(!a||!b)continue;const u=clamp((now-p.start)/p.duration,0,1),e=u*u*(3-2*u),x=this.point(a),y=this.point(b),px=x.x+(y.x-x.x)*e,py=x.y+(y.y-x.y)*e;
+        const bad=p.status==="failed"||p.status==="denied";c.shadowBlur=18;c.shadowColor=bad?COLORS.Guard:COLORS.CEO;c.fillStyle=bad?COLORS.Guard:COLORS.CEO;c.beginPath();c.arc(px,py,4,0,Math.PI*2);c.fill();c.shadowBlur=0;if(u<1)keep.push(p);
+      }this.packets=keep;
+    }
+    nodesDraw(){
+      const c=this.ctx;
+      for(const n of this.nodes){const p=this.point(n),color=COLORS[n.name],r=n.name==="CEO"?32:23,g=clamp(n.glow,0,1);n.glow*=.94;
+        if(g>.01||n.hover){c.shadowBlur=28+g*28;c.shadowColor=color;}c.fillStyle="rgba(6,12,25,.96)";c.strokeStyle=color;c.lineWidth=n.name==="CEO"?2.2:1.3;c.beginPath();c.arc(p.x,p.y,r+g*5,0,Math.PI*2);c.fill();c.stroke();c.shadowBlur=0;c.fillStyle=color;c.font=n.name==="CEO"?"700 12px system-ui":"600 10px system-ui";c.textAlign="center";c.textBaseline="middle";c.fillText(n.name.toUpperCase(),p.x,p.y);
       }
     }
-
-    drawBackground(time) {
-      const ctx = this.ctx;
-      ctx.clearRect(0, 0, this.width, this.height);
-      const gradient = ctx.createRadialGradient(this.width * 0.5, this.height * 0.5, 10, this.width * 0.5, this.height * 0.5, Math.max(this.width, this.height) * 0.7);
-      gradient.addColorStop(0, "rgba(22,38,74,0.42)");
-      gradient.addColorStop(0.55, "rgba(7,13,29,0.62)");
-      gradient.addColorStop(1, "rgba(3,6,15,0.96)");
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, this.width, this.height);
-      for (const particle of this.particles) {
-        if (!this.reducedMotion) particle.y = (particle.y + particle.speed) % 1;
-        const x = particle.x * this.width;
-        const y = particle.y * this.height;
-        const alpha = 0.18 + 0.12 * Math.sin(time * 0.001 + particle.phase);
-        ctx.fillStyle = `rgba(93,177,255,${clamp(alpha, 0.04, 0.35)})`;
-        ctx.fillRect(x, y, 1.2, 1.2);
-      }
+    hit(e){const r=this.canvas.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;return this.nodes.find(n=>{const p=this.point(n);return Math.hypot(x-p.x,y-p.y)<(n.name==="CEO"?40:31);})||null;}
+    hover(e){const n=this.hit(e);for(const x of this.nodes)x.hover=x===n;this.canvas.style.cursor=n?"pointer":"default";}
+    inspect(e){const n=this.hit(e);if(!n){this.inspector.innerHTML='<span class="muted">Select an agent node to inspect its latest observed communications.</span>';return;}
+      const rows=this.events.filter(x=>agent(x.sender)===n.name||agent(x.recipient)===n.name).slice(-5).reverse();
+      const html=rows.map(x=>`<div class="neural-detail"><span>${text(x.sender)} → ${text(x.recipient)}</span><small>${text(x.summary,"event")}</small></div>`).join("");
+      this.inspector.innerHTML=`<strong>${text(n.name)}</strong><div class="muted">${rows.length} recent related events</div>${html||'<div class="muted">No communication event observed yet.</div>'}`;
     }
-
-    drawEdges(time) {
-      const ctx = this.ctx;
-      for (const edge of this.edges) {
-        const a = this.nodes.find((node) => node.name === edge.a);
-        const b = this.nodes.find((node) => node.name === edge.b);
-        if (!a || !b) continue;
-        const p1 = this.point(a);
-        const p2 = this.point(b);
-        const pulse = edge.pulse;
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.strokeStyle = `rgba(72,141,210,${0.16 + pulse * 0.45})`;
-        ctx.lineWidth = 1 + pulse * 1.4;
-        ctx.stroke();
-        if (!this.reducedMotion) {
-          const t = (time * 0.00008) % 1;
-          const x = p1.x + (p2.x - p1.x) * t;
-          const y = p1.y + (p2.y - p1.y) * t;
-          ctx.fillStyle = "rgba(57,231,255,0.32)";
-          ctx.beginPath();
-          ctx.arc(x, y, 1.4, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-    }
-
-    drawPackets(time) {
-      const ctx = this.ctx;
-      const keep = [];
-      for (const packet of this.packets) {
-        const sender = this.nodes.find((node) => node.name === packet.sender);
-        const recipient = this.nodes.find((node) => node.name === packet.recipient);
-        if (!sender || !recipient) continue;
-        const progress = clamp((time - packet.start) / packet.duration, 0, 1);
-        const p1 = this.point(sender);
-        const p2 = this.point(recipient);
-        const eased = progress * progress * (3 - 2 * progress);
-        const x = p1.x + (p2.x - p1.x) * eased;
-        const y = p1.y + (p2.y - p1.y) * eased;
-        const color = packet.status === "failed" || packet.status === "denied" ? "#ff7f7f" : "#39e7ff";
-        ctx.shadowBlur = 18;
-        ctx.shadowColor = color;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(x, y, 4.2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        if (progress < 1) keep.push(packet);
-      }
-      this.packets = keep;
-    }
-
-    drawNodes() {
-      const ctx = this.ctx;
-      for (const node of this.nodes) {
-        const point = this.point(node);
-        const color = NODE_COLORS[node.name] || "#39e7ff";
-        const radius = node.name === "CEO" ? 32 : 23;
-        const glow = clamp(node.glow, 0, 1);
-        node.glow *= 0.94;
-        if (glow > 0.01 || node.hover) {
-          ctx.shadowBlur = 28 + glow * 30;
-          ctx.shadowColor = color;
-        }
-        ctx.fillStyle = "rgba(6,12,25,0.96)";
-        ctx.strokeStyle = color;
-        ctx.lineWidth = node.name === "CEO" ? 2.2 : 1.3;
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, radius + glow * 5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-        ctx.fillStyle = color;
-        ctx.font = node.name === "CEO" ? "700 12px system-ui" : "600 10px system-ui";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(node.name.toUpperCase(), point.x, point.y);
-      }
-    }
-
-    hitTest(x, y) {
-      for (const node of this.nodes) {
-        const point = this.point(node);
-        const radius = node.name === "CEO" ? 40 : 31;
-        if (Math.hypot(x - point.x, y - point.y) <= radius) return node;
-      }
-      return null;
-    }
-
-    hoverAt(event) {
-      const rect = this.canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      for (const node of this.nodes) node.hover = false;
-      const node = this.hitTest(x, y);
-      if (node) {
-        node.hover = true;
-        this.canvas.style.cursor = "pointer";
-      } else {
-        this.canvas.style.cursor = "default";
-      }
-    }
-
-    inspectAt(event) {
-      const rect = this.canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      const node = this.hitTest(x, y);
-      if (node) {
-        const related = this.events.filter((item) => normalizeAgent(item.sender) === node.name || normalizeAgent(item.recipient) === node.name).slice(-5).reverse();
-        this.inspector.innerHTML = `<strong>${node.name}</strong><div class="muted">${related.length} recent related events</div>${related.map((item) => `<div class="neural-detail"><span>${safeText(item.sender, "?")} → ${safeText(item.recipient, "?")}</span><small>${safeText(item.summary, "event")}</small></div>`).join("") || `<div class="muted">No communication event observed yet.</div>`;
-        return;
-      }
-      this.inspector.innerHTML = `<span class="muted">Select an agent node to inspect its latest observed communications.</span>`;
-    }
-
-    frame(time) {
-      if (!this.running) return;
-      this.drawBackground(time);
-      this.drawEdges(time);
-      this.drawPackets(time);
-      this.drawNodes();
-      requestAnimationFrame((next) => this.frame(next));
-    }
+    frame(t){this.background(t);this.edgesDraw();this.packetsDraw(t);this.nodesDraw();requestAnimationFrame(x=>this.frame(x));}
   }
-
-  function init() {
-    const root = document.querySelector("[data-neural-network]");
-    if (!root || !window.ResizeObserver) return;
-    window.cortexNeuralNetwork = new CortexNeuralNetwork(root);
-  }
-
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
-  else init();
+  function init(){const root=document.querySelector("[data-neural-network]");if(root&&window.ResizeObserver)new NeuralNetwork(root);}
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);else init();
 })();
