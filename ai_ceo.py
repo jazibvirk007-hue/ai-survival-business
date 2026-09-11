@@ -19,6 +19,12 @@ class Decision:
     reason: str
     expected_outcome: str
     requires_approval: bool = False
+
+    @property
+    def approval_required(self) -> bool:
+        """Backward-compatible dashboard/API spelling for the Guard flag."""
+        return self.requires_approval
+
     def to_dict(self) -> Dict[str, Any]: return asdict(self)
 
 class AICEO:
