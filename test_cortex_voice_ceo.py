@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from cortex_voice_ceo import CortexVoiceCEO
 
@@ -80,6 +80,16 @@ class VoiceCEOTests(unittest.TestCase):
     def test_transcript_length_is_bounded(self):
         with self.assertRaises(ValueError):
             self.voice.handle_transcript("x" * 4001)
+
+    def test_voice_telemetry_never_persists_transcript_content(self):
+        secret = "DO-NOT-PERSIST-VOICE-SECRET-123"
+        with patch("cortex_voice_ceo.record_message") as recorder:
+            result = self.voice.handle_transcript(secret)
+        self.assertTrue(result["ok"])
+        serialized_calls = repr(recorder.call_args_list)
+        self.assertNotIn(secret, serialized_calls)
+        for call in recorder.call_args_list:
+            self.assertIn("transcript_chars", repr(call)) if call.kwargs.get("metadata") else None
 
     def test_status_reports_v12_boundary(self):
         status = self.voice.status()
