@@ -29,6 +29,8 @@ def _validate(state: Dict[str, Any]) -> Dict[str, Any]:
 def load_runtime_state(path: str = STATE_PATH) -> Dict[str, Any]:
     if not os.path.exists(path):
         return {}
+    if os.path.getsize(path) == 0:
+        return {}
     try:
         with open(path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
