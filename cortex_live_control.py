@@ -28,7 +28,8 @@ def dispatch_live_control(
     scheduler: Optional[CortexSchedulerService] = None,
 ) -> tuple[int, dict[str, Any]]:
     """Dispatch browser controls using the existing governance boundaries."""
-    payload = payload or {}
+    if payload is None:
+        payload = {}
     if not isinstance(payload, dict):
         return 400, {"ok": False, "error": "payload_must_be_object"}
     if len(payload) > MAX_PAYLOAD_KEYS:
