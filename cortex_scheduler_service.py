@@ -5,9 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from cortex_autonomous_scheduler import CortexAutonomousScheduler
-from cortex_scheduler_persistence import load_scheduler_state, save_scheduler_state
 from cortex_v95_orchestrator import CortexV95Orchestrator
+from cortex_scheduler_persistence import load_scheduler_state, save_scheduler_state
 
 MAX_CONSECUTIVE_FAILURES = 3
 
@@ -42,6 +41,12 @@ class CortexSchedulerService:
             "recovery": self.state.get("recovery", "normal"),
             "truth_policy": "scheduler never writes financial truth",
         }
+
+    def pause(self) -> dict[str, Any]:
+        self.state["paused"] = True
+        self.state["recovery"] = "manual_pause"
+        save_scheduler_state(self.state, self.state_path)
+        return self.snapshot()
 
     def resume(self) -> dict[str, Any]:
         self.state["paused"] = False
