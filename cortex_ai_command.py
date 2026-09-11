@@ -32,7 +32,13 @@ class CortexAICommand:
     def select(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, Mapping):
             raise ValueError("selection payload must be an object")
-        selection = AIControlSelection(str(payload.get("provider_id", "")), str(payload.get("model", "")))
+        provider_id = payload.get("provider_id")
+        model = payload.get("model")
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            raise ValueError("provider_id is required")
+        if not isinstance(model, str) or not model.strip() or len(model.strip()) > 200:
+            raise ValueError("model is required and must be <= 200 characters")
+        selection = AIControlSelection(provider_id.strip(), model.strip())
         save_selection(selection, self.selection_path)
         return self.selected()
 
