@@ -31,8 +31,7 @@ def _safe_trace(value: Any) -> dict[str, Any]:
         "state",
         "truth_policy",
     }
-    trace = {key: value[key] for key in allowed if key in value}
-    return trace
+    return {key: value[key] for key in allowed if key in value}
 
 
 def build_cycle_history(runtime_snapshot: Mapping[str, Any] | None, limit: int = 20) -> dict[str, Any]:
@@ -40,7 +39,9 @@ def build_cycle_history(runtime_snapshot: Mapping[str, Any] | None, limit: int =
         raise ValueError("invalid limit")
     if runtime_snapshot is None:
         return {"status": "UNAVAILABLE", "count": 0, "cycles": []}
-    history = runtime_snapshot.get("history", [])
+    if "history" not in runtime_snapshot:
+        return {"status": "DEGRADED", "count": 0, "cycles": []}
+    history = runtime_snapshot.get("history")
     if not isinstance(history, list):
         return {"status": "DEGRADED", "count": 0, "cycles": []}
 
@@ -49,16 +50,14 @@ def build_cycle_history(runtime_snapshot: Mapping[str, Any] | None, limit: int =
         if not isinstance(item, dict):
             continue
         applied = item.get("applied_fields", [])
-        cycles.append(
-            {
-                "cycle_id": str(item.get("cycle_id", "unknown"))[:MAX_TEXT],
-                "action": str(item.get("action", "unknown"))[:MAX_TEXT],
-                "executed": bool(item.get("executed", False)),
-                "outcome": _safe_outcome(item.get("outcome")),
-                "applied_fields": [str(x)[:100] for x in applied][:20] if isinstance(applied, list) else [],
-                "cycle_trace": _safe_trace(item.get("cycle_trace")),
-            }
-        )
+        cycles.append({
+            "cycle_id": str(item.get("cycle_id", "unknown"))[:MAX_TEXT],
+            "action": str(item.get("action", "unknown"))[:MAX_TEXT],
+            "executed": bool(item.get("executed", False)),
+            "outcome": _safe_outcome(item.get("outcome")),
+            "applied_fields": [str(x)[:100] for x in applied][:20] if isinstance(applied, list) else [],
+            "cycle_trace": _safe_trace(item.get("cycle_trace")),
+        })
 
     cycles.reverse()
     return {"status": "READY", "count": len(cycles), "cycles": cycles, "max_cycles": MAX_CYCLES}
