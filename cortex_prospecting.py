@@ -23,10 +23,15 @@ class Prospect:
     status: str = "discovered"
 
     def __post_init__(self) -> None:
-        for field in ("name", "source", "problem_signal", "consent_or_basis", "status"):
+        # Discovery may observe a missing/empty authorization basis; the
+        # acquisition policy must decide whether that record can enter an
+        # outbound queue. Identity, source and problem evidence remain required.
+        for field in ("name", "source", "problem_signal", "status"):
             value = getattr(self, field)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{field} must be non-empty")
+        if not isinstance(self.consent_or_basis, str):
+            raise ValueError("consent_or_basis must be a string")
         for field in ("fit_score", "intent_score", "contactability"):
             value = getattr(self, field)
             if not isinstance(value, (int, float)) or not isfinite(float(value)) or not 0 <= value <= 100:
