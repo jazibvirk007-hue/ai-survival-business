@@ -1,5 +1,7 @@
 import unittest
+
 from cortex_realtime_test_harness import run_realtime_smoke_test
+
 
 class RealtimeHarnessTests(unittest.TestCase):
     def test_bounded_local_smoke(self):
@@ -10,10 +12,17 @@ class RealtimeHarnessTests(unittest.TestCase):
         self.assertTrue(result["invariants"]["financial_patch_blocked"])
         self.assertTrue(result["invariants"]["communication_events_observed"])
         self.assertTrue(result["invariants"]["learning_records_observed"])
+        self.assertTrue(result["invariants"]["restart_restored_state"])
+        self.assertTrue(result["invariants"]["corrupt_state_fails_closed"])
 
     def test_cycle_limit(self):
         with self.assertRaises(ValueError):
             run_realtime_smoke_test(6)
+
+    def test_boolean_is_not_a_cycle_count(self):
+        with self.assertRaises(ValueError):
+            run_realtime_smoke_test(True)
+
 
 if __name__ == "__main__":
     unittest.main()
