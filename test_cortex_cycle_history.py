@@ -11,6 +11,33 @@ class CycleHistoryTests(unittest.TestCase):
         self.assertEqual(result["cycles"][0]["cycle_id"], "2")
         self.assertEqual(result["count"], 2)
 
+    def test_browser_projection_limits_outcome_fields(self):
+        snapshot = {
+            "history": [
+                {
+                    "cycle_id": "x",
+                    "action": "research_market",
+                    "executed": False,
+                    "outcome": {
+                        "success": True,
+                        "status": "ok",
+                        "summary": "done",
+                        "extra_field": "hidden",
+                    },
+                    "cycle_trace": {
+                        "cycle_id": "x",
+                        "decision": {"action": "research_market"},
+                        "truth_policy": "verified revenue only",
+                        "extra_field": "hidden",
+                    },
+                }
+            ]
+        }
+        result = build_cycle_history(snapshot)
+        cycle = result["cycles"][0]
+        self.assertEqual(cycle["outcome"], {"success": True, "status": "ok", "summary": "done"})
+        self.assertNotIn("extra_field", cycle["cycle_trace"])
+
     def test_missing_history_fails_closed(self):
         result = build_cycle_history({"state": {}})
         self.assertEqual(result["status"], "DEGRADED")
