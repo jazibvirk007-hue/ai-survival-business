@@ -83,7 +83,7 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("/api/status", cortex_dashboard.CortexHandler.do_GET.__code__.co_consts)
         self.assertIn("/api/communications", cortex_dashboard.CortexHandler.do_GET.__code__.co_consts)
         self.assertIn("/cortex_neural_network.js", cortex_dashboard.CortexHandler.do_GET.__code__.co_consts)
-        self.assertIn("/api/chat", cortex_dashboard.CortexHandler.do_POST.__code__.co_consts)
+        self.assertTrue(any(isinstance(item, tuple) and "/api/chat" in item for item in cortex_dashboard.CortexHandler.do_POST.__code__.co_consts))
         self.assertIn("Cortex Neural Network", cortex_dashboard.HTML)
         self.assertIn("/cortex_neural_network.js", cortex_dashboard.HTML)
         self.assertEqual(cortex_dashboard.NEURAL_JS.name, "cortex_neural_network.js")
@@ -92,7 +92,6 @@ class DashboardTests(unittest.TestCase):
         with patch.object(cortex_dashboard, "provider_from_env", return_value=FakeProvider()), \
              patch.object(cortex_dashboard, "CortexCEOChat", FakeChat), \
              patch.object(cortex_dashboard, "build_chat_state", return_value={"revenue": 0}):
-            # Verify the endpoint contract without starting a network server.
             self.assertEqual(json.loads('{"message":"status"}')["message"], "status")
             chat = cortex_dashboard.CortexCEOChat(FakeProvider())
             self.assertEqual(chat.respond({"revenue": 0}, "status"), "Decision support response")
