@@ -35,6 +35,17 @@ def _shared_orchestrator(
     return get_cortex_orchestrator()
 
 
+def _runtime_snapshot(
+    scheduler: Optional[CortexSchedulerService],
+    orchestrator: Optional["CortexV95Orchestrator"],
+) -> Optional[dict[str, Any]]:
+    """Return a runtime snapshot when the supplied orchestrator exposes one."""
+    target = _shared_orchestrator(scheduler, orchestrator)
+    runtime = getattr(target, "runtime", None)
+    snapshot = getattr(runtime, "snapshot", None)
+    return snapshot() if callable(snapshot) else None
+
+
 def dispatch_command_center_route(
     method: str,
     path: str,
@@ -44,10 +55,16 @@ def dispatch_command_center_route(
     runtime_snapshot: Optional[dict[str, Any]] = None,
     scheduler: Optional[CortexSchedulerService] = None,
     orchestrator: Optional["CortexV95Orchestrator"] = None,
+    service: Optional[CortexSchedulerService] = None,
 ) -> tuple[int, dict[str, Any]]:
     """Dispatch supported Command Center, live, history, and scheduler routes safely."""
     method = str(method).upper()
-    payload = payload or {}
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        return _error("payload_must_be_object")
+    payload = dict(payload)
+    scheduler = scheduler or service
     route = path.split("?", 1)[0]
 
     if route == "/api/command-center/live":
@@ -64,12 +81,12 @@ def dispatch_command_center_route(
 
     if method == "GET" and route == "/api/cycles":
         if runtime_snapshot is None:
-            runtime_snapshot = _shared_orchestrator(scheduler, orchestrator).runtime.snapshot()
+            runtime_snapshot = _runtime_snapshot(scheduler, orchestrator)
         return dispatch_cycle_history_route(method, path, runtime_snapshot=runtime_snapshot)
 
     if method == "GET" and path == "/api/command-center":
         if runtime_snapshot is None and (orchestrator is not None or scheduler is not None):
-            runtime_snapshot = _shared_orchestrator(scheduler, orchestrator).runtime.snapshot()
+            runtime_snapshot = _runtime_snapshot(scheduler, orchestrator)
         return 200, build_command_center_snapshot(
             command=command,
             runtime_snapshot=runtime_snapshot,
