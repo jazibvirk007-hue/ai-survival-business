@@ -47,7 +47,7 @@ class CortexAutonomyRuntimeTests(unittest.TestCase):
         runtime = CortexAutonomyRuntime({"market_researched": True, "verified_revenue": 10})
         snapshot = runtime.snapshot()
         self.assertEqual(snapshot["state"]["verified_revenue"], 10)
-        self.assertEqual(snapshot["version"], "10.2")
+        self.assertEqual(snapshot["version"], "10.3")
         self.assertIn("research_market", snapshot["registered_actions"])
         self.assertTrue(snapshot["persistence"]["restart_safe"])
 
@@ -68,9 +68,8 @@ class CortexAutonomyRuntimeTests(unittest.TestCase):
             path = os.path.join(directory, "runtime.json")
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write("{not-json")
-            runtime = CortexAutonomyRuntime(initial_state={"market_researched": False}, state_path=path)
-            self.assertEqual(runtime.persistence_status, "corrupt_state")
-            self.assertFalse(runtime.state.get("market_researched", True))
+            with self.assertRaises(ValueError):
+                CortexAutonomyRuntime(initial_state={"market_researched": False}, state_path=path)
 
     def test_persisted_shape_is_bounded(self):
         with tempfile.TemporaryDirectory() as directory:
