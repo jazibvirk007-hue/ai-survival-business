@@ -10,6 +10,7 @@ cortex_memory.json
 cortex_approvals.json
 cortex_communications.json
 cortex_ai_selection.json
+cortex_scheduler_state.json
 generated_products/
 deliveries/
 .env
