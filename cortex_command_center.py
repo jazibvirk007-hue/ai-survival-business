@@ -1,11 +1,4 @@
-"""Unified, browser-safe state surface for the Cortex Command Center.
-
-This module intentionally contains no business execution logic. It composes
-existing governed components into one bounded snapshot for the dashboard:
-AI provider selection/health, recent inter-agent communications, runtime
-health, and persistent scheduler state. Secrets and raw credentials are never
-exposed.
-"""
+"""Unified, browser-safe state surface for the Cortex Command Center."""
 
 from __future__ import annotations
 
@@ -15,6 +8,7 @@ from cortex_ai_command import CortexAICommand
 from cortex_ai_health import build_ai_health
 from cortex_communication import communication_status, recent_messages
 from cortex_autonomy_health import evaluate_runtime_health
+from cortex_cycle_history import build_cycle_history
 
 MAX_EVENTS = 50
 MAX_ERROR_TEXT = 500
@@ -56,11 +50,16 @@ def build_command_center_snapshot(
         communication = {"status": "DEGRADED", "events": [], "error": _safe_error(exc)}
 
     runtime_health = None
+    cycle_history = {"status": "UNAVAILABLE", "count": 0, "cycles": []}
     if runtime_snapshot is not None:
         try:
             runtime_health = evaluate_runtime_health(runtime_snapshot)
         except Exception as exc:
             runtime_health = {"status": "INVALID_SNAPSHOT", "error": _safe_error(exc)}
+        try:
+            cycle_history = build_cycle_history(runtime_snapshot, limit=min(event_limit, 50))
+        except Exception as exc:
+            cycle_history = {"status": "DEGRADED", "count": 0, "cycles": [], "error": _safe_error(exc)}
 
     scheduler_snapshot = None
     try:
@@ -73,19 +72,17 @@ def build_command_center_snapshot(
 
     return {
         "engine": "Cortex Command Center",
-        "version": "9.5.1",
-        "ai": {
-            "catalog": catalog,
-            "selected": selected,
-            "health": ai_health,
-        },
+        "version": "9.5.2",
+        "ai": {"catalog": catalog, "selected": selected, "health": ai_health},
         "communications": communication,
         "runtime_health": runtime_health,
+        "cycle_history": cycle_history,
         "scheduler": scheduler_snapshot,
         "truth_policy": {
             "revenue": "verified observations only",
             "credentials": "server-side only",
             "execution": "governed",
             "scheduler": "bounded and safety-pausable",
+            "history": "observational audit only",
         },
     }
