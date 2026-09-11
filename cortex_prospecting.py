@@ -23,13 +23,13 @@ class Prospect:
     status: str = "discovered"
 
     def __post_init__(self) -> None:
-        # Discovery may observe a missing/empty authorization basis; the
-        # acquisition policy must decide whether that record can enter an
-        # outbound queue. Identity, source and problem evidence remain required.
-        for field in ("name", "source", "problem_signal", "status"):
+        # Discovery may defer need/problem validation to the acquisition policy.
+        for field in ("name", "source", "status"):
             value = getattr(self, field)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{field} must be non-empty")
+        if not isinstance(self.problem_signal, str):
+            raise ValueError("problem_signal must be a string")
         if not isinstance(self.consent_or_basis, str):
             raise ValueError("consent_or_basis must be a string")
         for field in ("fit_score", "intent_score", "contactability"):
@@ -71,7 +71,6 @@ class CortexProspecting:
             raise TypeError("all prospects must be Prospect objects")
         ranked = []
         for prospect in items:
-            # Intent and fit dominate; contactability only breaks ties modestly.
             score = (prospect.fit_score * 0.45) + (prospect.intent_score * 0.45) + (prospect.contactability * 0.10)
             row = prospect.to_dict()
             row["priority_score"] = round(score, 2)
