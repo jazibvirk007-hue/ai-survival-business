@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
-from cortex_v95_orchestrator import CortexV95Orchestrator
 from cortex_scheduler_persistence import load_scheduler_state, save_scheduler_state
+
+if TYPE_CHECKING:
+    from cortex_v95_orchestrator import CortexV95Orchestrator
 
 MAX_CONSECUTIVE_FAILURES = 3
 
@@ -18,8 +20,11 @@ def _now() -> str:
 class CortexSchedulerService:
     """Restore scheduler state, run bounded work, and persist recovery state."""
 
-    def __init__(self, orchestrator: Optional[CortexV95Orchestrator] = None, state_path: str = "cortex_scheduler_state.json"):
-        self.orchestrator = orchestrator or CortexV95Orchestrator()
+    def __init__(self, orchestrator: Optional["CortexV95Orchestrator"] = None, state_path: str = "cortex_scheduler_state.json"):
+        if orchestrator is None:
+            from cortex_v95_orchestrator import CortexV95Orchestrator
+            orchestrator = CortexV95Orchestrator()
+        self.orchestrator = orchestrator
         self.state_path = state_path
         try:
             self.state = load_scheduler_state(state_path)
