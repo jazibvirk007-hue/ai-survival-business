@@ -1,5 +1,4 @@
 """Persistent, bounded scheduler service for Cortex."""
-
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -22,8 +21,8 @@ class CortexSchedulerService:
 
     def __init__(self, orchestrator: Optional["CortexV95Orchestrator"] = None, state_path: str = "cortex_scheduler_state.json"):
         if orchestrator is None:
-            from cortex_v95_orchestrator import CortexV95Orchestrator
-            orchestrator = CortexV95Orchestrator()
+            from cortex_runtime_singleton import get_cortex_orchestrator
+            orchestrator = get_cortex_orchestrator()
         self.orchestrator = orchestrator
         self.state_path = state_path
         try:
