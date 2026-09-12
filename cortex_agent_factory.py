@@ -1,26 +1,22 @@
-"""Cortex Agent Factory: design and package customer-demand AI agents.
+"""Cortex Agent Factory: design, package, and staff bounded AI agents.
 
-This module creates bounded, reviewable agent specifications. It does not
-silently deploy agents, contact customers, access secrets, or execute tools.
-Those actions belong to later Commerce/Guard integrations.
+The factory can design sellable agent products and, when the runtime identifies
+a justified missing specialist, register one bounded handler. Hiring never
+creates payment authority, Guard authority, customer identities, or arbitrary
+tool access.
 """
 
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional
+import re
+
+from cortex_specialist_registry import CortexSpecialistRegistry
 
 
 AGENT_CATEGORIES = (
-    "customer_support",
-    "sales",
-    "marketing",
-    "research",
-    "operations",
-    "finance",
-    "content",
-    "coding",
-    "data_analysis",
-    "workflow_automation",
-    "custom",
+    "customer_support", "sales", "marketing", "research", "operations",
+    "finance", "content", "coding", "data_analysis", "workflow_automation", "custom",
 )
 
 
@@ -57,42 +53,42 @@ class AgentProductSpec:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class HiredAgent:
+    name: str
+    action: str
+    purpose: str
+    created_at: str
+    reason: str
+    status: str = "active"
+
+
 class CortexAgentFactory:
-    """Turns a real customer requirement into a sellable agent specification."""
+    """Turns demand into agent products and staffs missing bounded specialists."""
+
+    MAX_HIRED_AGENTS = 32
+    MAX_TEXT = 240
+
+    def __init__(self, registry: Optional[CortexSpecialistRegistry] = None) -> None:
+        self.registry = registry if registry is not None else CortexSpecialistRegistry()
+        self._hired: Dict[str, HiredAgent] = {}
 
     @staticmethod
     def from_customer_demand(
-        problem: str,
-        customer: str,
-        category: str,
-        capabilities: List[str],
-        inputs: List[str],
-        outputs: List[str],
-        integrations: List[str],
-        price: float,
+        problem: str, customer: str, category: str, capabilities: List[str],
+        inputs: List[str], outputs: List[str], integrations: List[str], price: float,
         name: str = "Custom Cortex Agent",
     ) -> AgentProductSpec:
         return AgentProductSpec(name, category, problem, customer, capabilities, inputs, outputs, integrations, price, True)
 
     @staticmethod
     def build_package(spec: AgentProductSpec) -> Dict[str, Any]:
-        """Return a deterministic package manifest for later artifact generation."""
         if not isinstance(spec, AgentProductSpec):
             raise TypeError("spec must be AgentProductSpec")
         return {
-            "product_type": "ai_agent",
-            "version": "1.0",
-            "manifest": spec.to_dict(),
-            "artifacts": [
-                "agent_definition.json",
-                "system_instructions.txt",
-                "setup_guide.md",
-                "usage_guide.md",
-                "integration_guide.md",
-                "safety_and_limits.md",
-            ],
-            "deployment": "customer-controlled_or_authorized_platform",
-            "external_actions": "approval_gated",
+            "product_type": "ai_agent", "version": "1.0", "manifest": spec.to_dict(),
+            "artifacts": ["agent_definition.json", "system_instructions.txt", "setup_guide.md", "usage_guide.md", "integration_guide.md", "safety_and_limits.md"],
+            "deployment": "customer-controlled_or_authorized_platform", "external_actions": "approval_gated",
         }
 
     @staticmethod
@@ -109,10 +105,57 @@ class CortexAgentFactory:
         }
         return {"passed": all(checks.values()), "checks": checks}
 
+    def should_hire(self, action: str, workload: int) -> bool:
+        """Use observed workload to decide whether an unstaffed action needs capacity."""
+        return self.registry.get(action) is None and action in self.registry.status()["allowed_actions"] and workload > 0
+
+    @staticmethod
+    def _bounded_text(value: str, label: str) -> str:
+        text = str(value or "").strip()
+        if not text or len(text) > CortexAgentFactory.MAX_TEXT:
+            raise ValueError(f"{label} must be non-empty and <= {CortexAgentFactory.MAX_TEXT} characters")
+        return text
+
+    @staticmethod
+    def _safe_name(value: str) -> str:
+        name = CortexAgentFactory._bounded_text(value, "agent name")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]*", name):
+            raise ValueError("agent name contains unsupported characters")
+        return name
+
+    def hire(
+        self,
+        *,
+        name: str,
+        action: str,
+        purpose: str,
+        handler: Callable[[Dict[str, Any]], Any],
+        reason: str,
+    ) -> HiredAgent:
+        """Hire/register one specialist after a concrete observed need is supplied."""
+        name = self._safe_name(name)
+        purpose = self._bounded_text(purpose, "agent purpose")
+        reason = self._bounded_text(reason, "hire reason")
+        if not callable(handler):
+            raise TypeError("handler must be callable")
+        if len(self._hired) >= self.MAX_HIRED_AGENTS:
+            raise RuntimeError("agent hiring capacity reached")
+        if action not in self.registry.status()["allowed_actions"]:
+            raise ValueError(f"unsupported specialist action: {action}")
+        if self.registry.get(action) is not None:
+            raise ValueError(f"specialist action already staffed: {action}")
+        self.registry.register(action, handler)
+        hired = HiredAgent(name, action, purpose, datetime.now(timezone.utc).isoformat(), reason)
+        self._hired[action] = hired
+        return hired
+
+    def roster(self) -> List[Dict[str, Any]]:
+        return [asdict(agent) for agent in self._hired.values()]
+
     def status(self) -> Dict[str, Any]:
         return {
-            "engine": "Cortex Agent Factory",
-            "version": "1.0",
-            "product_type": "customer_demand_ai_agents",
-            "deployment_policy": "authorized_and_guarded",
+            "engine": "Cortex Agent Factory", "version": "20.0", "product_type": "customer_demand_ai_agents",
+            "deployment_policy": "authorized_and_guarded", "hiring_capacity": self.MAX_HIRED_AGENTS,
+            "hired_agents": len(self._hired), "roster": self.roster(),
+            "authority_boundary": "no_payment_or_guard_authority",
         }
