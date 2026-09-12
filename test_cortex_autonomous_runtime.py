@@ -47,18 +47,30 @@ class TestCortexAutonomousRuntime(unittest.TestCase):
 
     def test_handler_executes_only_one_selected_transition(self) -> None:
         calls = []
+
         def handler(state):
             calls.append(state)
             return {"success": True, "observed": True}
+
         with patch("order_engine.ORDERS_FILE", self.orders), patch("payment_tracker.PAYMENTS_FILE", self.payments):
             result = self.runtime.cycle({"market_researched": False}, execute=True, handler=handler)
         self.assertTrue(result["executed"])
         self.assertEqual(len(calls), 1)
         self.assertEqual(result["transition_budget"], 1)
 
+    def test_register_rejects_unknown_specialist_action(self) -> None:
+        with self.assertRaises(ValueError):
+            self.runtime.register("send_money", lambda state: None)
+
+    def test_registered_specialist_is_visible_in_status(self) -> None:
+        self.runtime.register("research_market", lambda state: {"success": True})
+        status = self.runtime.status()
+        self.assertEqual(status["version"], "19.1")
+        self.assertIn("research_market", status["specialist_registry"]["registered_actions"])
+
     def test_status_declares_control_loop(self) -> None:
         status = self.runtime.status()
-        self.assertEqual(status["version"], "19.0")
+        self.assertEqual(status["version"], "19.1")
         self.assertEqual(status["control_loop"], ["observe", "decide", "guard", "execute", "verify", "learn", "repeat"])
 
 
