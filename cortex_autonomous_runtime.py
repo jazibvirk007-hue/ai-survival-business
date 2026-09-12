@@ -19,17 +19,13 @@ from cortex_specialist_registry import CortexSpecialistRegistry
 class CortexAutonomousRuntime:
     """Run one evidence-backed, bounded business transition per cycle."""
 
-    VERSION = "20.0"
+    VERSION = "20.2"
     MAX_TRANSITIONS_PER_CYCLE = 1
 
-    def __init__(
-        self,
-        *,
-        growth: Optional[AutonomousGrowthLoop] = None,
-        revenue: Optional[CortexRevenueLoop] = None,
-        specialists: Optional[CortexSpecialistRegistry] = None,
-        agent_factory: Optional[CortexAgentFactory] = None,
-    ) -> None:
+    def __init__(self, *, growth: Optional[AutonomousGrowthLoop] = None,
+                 revenue: Optional[CortexRevenueLoop] = None,
+                 specialists: Optional[CortexSpecialistRegistry] = None,
+                 agent_factory: Optional[CortexAgentFactory] = None) -> None:
         self.growth = growth if growth is not None else AutonomousGrowthLoop()
         self.revenue = revenue if revenue is not None else CortexRevenueLoop(guard=self.growth.guard)
         self.specialists = specialists if specialists is not None else CortexSpecialistRegistry()
@@ -42,6 +38,8 @@ class CortexAutonomousRuntime:
             raise TypeError("specialists must be CortexSpecialistRegistry")
         if not isinstance(self.agent_factory, CortexAgentFactory):
             raise TypeError("agent_factory must be CortexAgentFactory")
+        if self.agent_factory.registry is not self.specialists:
+            raise ValueError("agent_factory must use the runtime specialist registry")
         self.history: list[Dict[str, Any]] = []
 
     def register(self, action: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
@@ -49,25 +47,26 @@ class CortexAutonomousRuntime:
         self.specialists.register(action, handler)
         self.growth.register(action, handler)
 
-    def hire_agent(
-        self,
-        *,
-        name: str,
-        action: str,
-        purpose: str,
-        reason: str,
-        handler: Callable[[Dict[str, Any]], Any],
-        observed_workload: int = 1,
-    ) -> HiredAgent:
+    def propose_agent_hire(self, *, action: str, workload: int, reason: str,
+                           proposed_name: str, purpose: str) -> Dict[str, Any]:
+        """Turn observed unmet workload into a non-executing hiring proposal."""
+        request = self.agent_factory.propose_hire(
+            action=action, workload=workload, reason=reason,
+            proposed_name=proposed_name, purpose=purpose,
+        )
+        return {
+            "request": request.__dict__.copy(),
+            "execution": "not_authorized",
+            "next_step": "explicitly supply a bounded handler to hire_agent",
+        }
+
+    def hire_agent(self, *, name: str, action: str, purpose: str, reason: str,
+                   handler: Callable[[Dict[str, Any]], Any], observed_workload: int = 1) -> HiredAgent:
         """Hire a new bounded specialist only when observed workload justifies it."""
         if not self.agent_factory.should_hire(action, observed_workload):
             raise ValueError("agent hiring is not justified or action is already staffed")
         hired = self.agent_factory.hire(
-            name=name,
-            action=action,
-            purpose=purpose,
-            reason=reason,
-            handler=handler,
+            name=name, action=action, purpose=purpose, reason=reason, handler=handler,
         )
         self.growth.register(action, handler)
         return hired
@@ -87,14 +86,9 @@ class CortexAutonomousRuntime:
         base["agent_factory"] = self.agent_factory.status()
         return base
 
-    def cycle(
-        self,
-        state: Optional[Dict[str, Any]] = None,
-        *,
-        execute: bool = False,
-        approval_id: Optional[str] = None,
-        handler: Optional[Callable[[Dict[str, Any]], Any]] = None,
-    ) -> Dict[str, Any]:
+    def cycle(self, state: Optional[Dict[str, Any]] = None, *, execute: bool = False,
+              approval_id: Optional[str] = None,
+              handler: Optional[Callable[[Dict[str, Any]], Any]] = None) -> Dict[str, Any]:
         """Run exactly one governed growth transition."""
         observed = self.observe(state)
         cycle_id = "V20-" + uuid.uuid4().hex[:12].upper()
