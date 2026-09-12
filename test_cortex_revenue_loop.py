@@ -19,15 +19,17 @@ class CortexRevenueLoopTests(unittest.TestCase):
         self.sales_file = os.path.join(self.directory.name, "sales.json")
         self.guard = CortexGuard(self.approvals)
         self.sales = SalesEngine(self.sales_file)
+        self.paths = [
+            patch.object(order_engine, "ORDERS_FILE", self.orders),
+            patch.object(payment_tracker, "PAYMENTS_FILE", self.payments),
+        ]
+        for path in self.paths:
+            path.start()
         self.loop = CortexRevenueLoop(sales=self.sales, guard=self.guard)
-        self.paths = patch.multiple(
-            order_engine, ORDERS_FILE=self.orders,
-            payment_tracker, PAYMENTS_FILE=self.payments,
-        )
-        self.paths.start()
 
     def tearDown(self):
-        self.paths.stop()
+        for path in reversed(self.paths):
+            path.stop()
         self.directory.cleanup()
 
     def test_empty_ledger_returns_factual_zero_state(self):
