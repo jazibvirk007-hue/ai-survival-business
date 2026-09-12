@@ -5,12 +5,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from cortex_agent_factory import CortexAgentFactory
 from cortex_autonomous_runtime import CortexAutonomousRuntime
 from cortex_autonomous_growth_loop import AutonomousGrowthLoop
 from cortex_guard import CortexGuard
 from cortex_learning import CortexLearning
 from cortex_memory import CortexMemory
 from cortex_revenue_loop import CortexRevenueLoop
+from cortex_specialist_registry import CortexSpecialistRegistry
 
 
 class TestCortexAutonomousRuntime(unittest.TestCase):
@@ -65,7 +67,7 @@ class TestCortexAutonomousRuntime(unittest.TestCase):
     def test_registered_specialist_is_visible_in_status(self) -> None:
         self.runtime.register("research_market", lambda state: {"success": True})
         status = self.runtime.status()
-        self.assertEqual(status["version"], "20.0")
+        self.assertEqual(status["version"], "20.2")
         self.assertIn("research_market", status["specialist_registry"]["registered_actions"])
         self.assertEqual(status["agent_factory"]["hired_agents"], 0)
 
@@ -85,6 +87,22 @@ class TestCortexAutonomousRuntime(unittest.TestCase):
         self.assertIsNotNone(self.runtime.specialists.get("improve_offer"))
         self.assertEqual(self.runtime.agent_factory.status()["hired_agents"], 1)
 
+    def test_propose_agent_hire_is_non_executing(self) -> None:
+        proposal = self.runtime.propose_agent_hire(
+            action="review_financials",
+            workload=4,
+            reason="Observed financial review backlog",
+            proposed_name="Finance Capacity Specialist",
+            purpose="Handle bounded financial review workload",
+        )
+        self.assertEqual(proposal["execution"], "not_authorized")
+        self.assertEqual(proposal["request"]["action"], "review_financials")
+        self.assertIsNone(self.runtime.specialists.get("review_financials"))
+
+    def test_custom_factory_must_share_runtime_registry(self) -> None:
+        with self.assertRaises(ValueError):
+            CortexAutonomousRuntime(agent_factory=CortexAgentFactory(CortexSpecialistRegistry()))
+
     def test_hire_agent_does_not_duplicate_staffed_action(self) -> None:
         self.runtime.register("research_market", lambda state: {"success": True})
         with self.assertRaises(ValueError):
@@ -99,7 +117,7 @@ class TestCortexAutonomousRuntime(unittest.TestCase):
 
     def test_status_declares_control_loop(self) -> None:
         status = self.runtime.status()
-        self.assertEqual(status["version"], "20.0")
+        self.assertEqual(status["version"], "20.2")
         self.assertEqual(status["control_loop"], ["observe", "decide", "guard", "execute", "verify", "learn", "repeat"])
 
 
