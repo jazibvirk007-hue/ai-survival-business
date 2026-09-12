@@ -9,6 +9,8 @@ tool access.
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+import json
+import os
 import re
 
 from cortex_specialist_registry import CortexSpecialistRegistry
@@ -70,10 +72,12 @@ class CortexAgentFactory:
     MAX_HIRE_REQUESTS = 64
     MAX_TEXT = 240
 
-    def __init__(self, registry: Optional[CortexSpecialistRegistry] = None) -> None:
+    def __init__(self, registry: Optional[CortexSpecialistRegistry] = None, path: Optional[str] = None) -> None:
         self.registry = registry if registry is not None else CortexSpecialistRegistry()
+        self.path = path
         self._hired: Dict[str, HiredAgent] = {}
         self._hire_requests: List[HireRequest] = []
+        self._load_state()
 
     @staticmethod
     def from_customer_demand(problem: str, customer: str, category: str, capabilities: List[str], inputs: List[str], outputs: List[str], integrations: List[str], price: float, name: str = "Custom Cortex Agent") -> AgentProductSpec:
@@ -102,6 +106,7 @@ class CortexAgentFactory:
         if len(self._hire_requests) >= self.MAX_HIRE_REQUESTS: self._hire_requests = self._hire_requests[-(self.MAX_HIRE_REQUESTS - 1):]
         request = HireRequest(action, workload, reason, proposed_name, purpose, datetime.now(timezone.utc).isoformat())
         self._hire_requests.append(request)
+        self._save_state()
         return request
 
     @staticmethod
@@ -126,10 +131,41 @@ class CortexAgentFactory:
         self.registry.register(action, handler)
         hired = HiredAgent(name, action, purpose, datetime.now(timezone.utc).isoformat(), reason)
         self._hired[action] = hired
+        self._save_state()
         return hired
+
+    def _load_state(self) -> None:
+        if not self.path or not os.path.exists(self.path): return
+        try:
+            with open(self.path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            hired = payload.get("hired_agents", [])
+            requests = payload.get("hire_requests", [])
+            if isinstance(hired, list):
+                for item in hired[-self.MAX_HIRED_AGENTS:]:
+                    if isinstance(item, dict) and item.get("action") and item.get("status") == "active":
+                        self._hired[str(item["action"])] = HiredAgent(**{key: item[key] for key in ("name", "action", "purpose", "created_at", "reason", "status")})
+            if isinstance(requests, list):
+                for item in requests[-self.MAX_HIRE_REQUESTS:]:
+                    if isinstance(item, dict):
+                        self._hire_requests.append(HireRequest(**{key: item[key] for key in ("action", "workload", "reason", "proposed_name", "purpose", "created_at", "status")}))
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            self._hired, self._hire_requests = {}, []
+
+    def _save_state(self) -> None:
+        if not self.path: return
+        directory = os.path.dirname(os.path.abspath(self.path))
+        os.makedirs(directory, exist_ok=True)
+        payload = {"version": "20.2", "hired_agents": self.roster(), "hire_requests": self.hire_requests()[-self.MAX_HIRE_REQUESTS:]}
+        temp = self.path + ".tmp"
+        with open(temp, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, self.path)
 
     def roster(self) -> List[Dict[str, Any]]: return [asdict(agent) for agent in self._hired.values()]
     def hire_requests(self) -> List[Dict[str, Any]]: return [asdict(request) for request in self._hire_requests]
 
     def status(self) -> Dict[str, Any]:
-        return {"engine": "Cortex Agent Factory", "version": "20.1", "product_type": "customer_demand_ai_agents", "deployment_policy": "authorized_and_guarded", "hiring_capacity": self.MAX_HIRED_AGENTS, "hired_agents": len(self._hired), "roster": self.roster(), "hire_requests": len(self._hire_requests), "pending_hire_requests": self.hire_requests()[-10:], "authority_boundary": "no_payment_or_guard_authority; hire proposals do not execute code"}
+        return {"engine": "Cortex Agent Factory", "version": "20.2", "product_type": "customer_demand_ai_agents", "deployment_policy": "authorized_and_guarded", "hiring_capacity": self.MAX_HIRED_AGENTS, "hired_agents": len(self._hired), "roster": self.roster(), "hire_requests": len(self._hire_requests), "pending_hire_requests": self.hire_requests()[-10:], "persistence": bool(self.path), "authority_boundary": "no_payment_or_guard_authority; hire proposals do not execute code"}
