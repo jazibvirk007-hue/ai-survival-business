@@ -1,8 +1,8 @@
 """Unified bounded Cortex runtime.
 
 Observe -> Decide -> Guard -> Execute -> Verify -> Learn -> Repeat.
-The runtime composes the existing revenue, growth, and specialist registry
-systems instead of creating a second payment, customer, or authorization authority.
+The runtime composes revenue, growth, specialist registry, and bounded agent
+factory systems without creating a second payment or authorization authority.
 """
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 import uuid
 
+from cortex_agent_factory import CortexAgentFactory, HiredAgent
 from cortex_autonomous_growth_loop import AutonomousGrowthLoop
 from cortex_revenue_loop import CortexRevenueLoop
 from cortex_specialist_registry import CortexSpecialistRegistry
@@ -18,7 +19,7 @@ from cortex_specialist_registry import CortexSpecialistRegistry
 class CortexAutonomousRuntime:
     """Run one evidence-backed, bounded business transition per cycle."""
 
-    VERSION = "19.1"
+    VERSION = "20.0"
     MAX_TRANSITIONS_PER_CYCLE = 1
 
     def __init__(
@@ -27,22 +28,49 @@ class CortexAutonomousRuntime:
         growth: Optional[AutonomousGrowthLoop] = None,
         revenue: Optional[CortexRevenueLoop] = None,
         specialists: Optional[CortexSpecialistRegistry] = None,
+        agent_factory: Optional[CortexAgentFactory] = None,
     ) -> None:
         self.growth = growth if growth is not None else AutonomousGrowthLoop()
         self.revenue = revenue if revenue is not None else CortexRevenueLoop(guard=self.growth.guard)
         self.specialists = specialists if specialists is not None else CortexSpecialistRegistry()
+        self.agent_factory = agent_factory if agent_factory is not None else CortexAgentFactory(self.specialists)
         if not isinstance(self.growth, AutonomousGrowthLoop):
             raise TypeError("growth must be AutonomousGrowthLoop")
         if not isinstance(self.revenue, CortexRevenueLoop):
             raise TypeError("revenue must be CortexRevenueLoop")
         if not isinstance(self.specialists, CortexSpecialistRegistry):
             raise TypeError("specialists must be CortexSpecialistRegistry")
+        if not isinstance(self.agent_factory, CortexAgentFactory):
+            raise TypeError("agent_factory must be CortexAgentFactory")
         self.history: list[Dict[str, Any]] = []
 
     def register(self, action: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
         """Register one CEO action through the single specialist authority."""
         self.specialists.register(action, handler)
         self.growth.register(action, handler)
+
+    def hire_agent(
+        self,
+        *,
+        name: str,
+        action: str,
+        purpose: str,
+        reason: str,
+        handler: Callable[[Dict[str, Any]], Any],
+        observed_workload: int = 1,
+    ) -> HiredAgent:
+        """Hire a new bounded specialist only when observed workload justifies it."""
+        if not self.agent_factory.should_hire(action, observed_workload):
+            raise ValueError("agent hiring is not justified or action is already staffed")
+        hired = self.agent_factory.hire(
+            name=name,
+            action=action,
+            purpose=purpose,
+            reason=reason,
+            handler=handler,
+        )
+        self.growth.register(action, handler)
+        return hired
 
     def observe(self, state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Merge caller observations with authoritative revenue observations."""
@@ -55,6 +83,8 @@ class CortexAutonomousRuntime:
         base["pending_payments"] = revenue["pending_payments"]
         base["delivered_orders"] = revenue["delivered_orders"]
         base["truth_policy"] = "verified_observations_only"
+        base["specialist_registry"] = self.specialists.status()
+        base["agent_factory"] = self.agent_factory.status()
         return base
 
     def cycle(
@@ -65,13 +95,9 @@ class CortexAutonomousRuntime:
         approval_id: Optional[str] = None,
         handler: Optional[Callable[[Dict[str, Any]], Any]] = None,
     ) -> Dict[str, Any]:
-        """Run exactly one governed growth transition.
-
-        A supplied handler is registered only for the CEO-selected action through
-        the specialist registry; external/irreversible actions remain subject to Guard.
-        """
+        """Run exactly one governed growth transition."""
         observed = self.observe(state)
-        cycle_id = "V19-" + uuid.uuid4().hex[:12].upper()
+        cycle_id = "V20-" + uuid.uuid4().hex[:12].upper()
         decision = self.growth.ceo.decide(observed)
         if handler is not None:
             self.register(decision.action, handler)
@@ -98,6 +124,7 @@ class CortexAutonomousRuntime:
             "revenue_policy": "verified_observations_only",
             "execution_policy": "decision_only_by_default; governed execution when explicitly enabled",
             "specialist_registry": self.specialists.status(),
+            "agent_factory": self.agent_factory.status(),
             "last_cycle_at": self.history[-1].get("timestamp") if self.history else None,
             "runtime_started_at": datetime.now(timezone.utc).isoformat(),
         }
