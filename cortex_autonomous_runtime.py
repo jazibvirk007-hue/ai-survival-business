@@ -12,6 +12,7 @@ import uuid
 
 from cortex_agent_factory import CortexAgentFactory, HiredAgent
 from cortex_autonomous_growth_loop import AutonomousGrowthLoop
+from cortex_hiring_advisor import CortexHiringAdvisor
 from cortex_revenue_loop import CortexRevenueLoop
 from cortex_specialist_registry import CortexSpecialistRegistry
 
@@ -19,7 +20,7 @@ from cortex_specialist_registry import CortexSpecialistRegistry
 class CortexAutonomousRuntime:
     """Run one evidence-backed, bounded business transition per cycle."""
 
-    VERSION = "20.2"
+    VERSION = "20.3"
     MAX_TRANSITIONS_PER_CYCLE = 1
 
     def __init__(self, *, growth: Optional[AutonomousGrowthLoop] = None,
@@ -40,6 +41,7 @@ class CortexAutonomousRuntime:
             raise TypeError("agent_factory must be CortexAgentFactory")
         if self.agent_factory.registry is not self.specialists:
             raise ValueError("agent_factory must use the runtime specialist registry")
+        self.hiring_advisor = CortexHiringAdvisor(self.specialists)
         self.history: list[Dict[str, Any]] = []
 
     def register(self, action: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
@@ -59,6 +61,12 @@ class CortexAutonomousRuntime:
             "execution": "not_authorized",
             "next_step": "explicitly supply a bounded handler to hire_agent",
         }
+
+    def hiring_recommendations(self, state: Optional[Dict[str, Any]] = None) -> list[Dict[str, Any]]:
+        """Recommend missing specialists from objective workload evidence only."""
+        observed = state or {}
+        workload = observed.get("specialist_workload", {})
+        return self.hiring_advisor.recommend(workload)
 
     def hire_agent(self, *, name: str, action: str, purpose: str, reason: str,
                    handler: Callable[[Dict[str, Any]], Any], observed_workload: int = 1) -> HiredAgent:
@@ -84,6 +92,7 @@ class CortexAutonomousRuntime:
         base["truth_policy"] = "verified_observations_only"
         base["specialist_registry"] = self.specialists.status()
         base["agent_factory"] = self.agent_factory.status()
+        base["hiring_recommendations"] = self.hiring_advisor.recommend(base.get("specialist_workload", {}))
         return base
 
     def cycle(self, state: Optional[Dict[str, Any]] = None, *, execute: bool = False,
@@ -103,6 +112,7 @@ class CortexAutonomousRuntime:
         result["revenue_snapshot"] = observed["revenue_snapshot"]
         result["verification"] = "provider_authoritative"
         result["transition_budget"] = self.MAX_TRANSITIONS_PER_CYCLE
+        result["hiring_recommendations"] = observed["hiring_recommendations"]
         self.history.append(dict(result))
         self.history = self.history[-200:]
         return result
@@ -119,6 +129,7 @@ class CortexAutonomousRuntime:
             "execution_policy": "decision_only_by_default; governed execution when explicitly enabled",
             "specialist_registry": self.specialists.status(),
             "agent_factory": self.agent_factory.status(),
+            "hiring_advisor": self.hiring_advisor.status(),
             "last_cycle_at": self.history[-1].get("timestamp") if self.history else None,
             "runtime_started_at": datetime.now(timezone.utc).isoformat(),
         }
