@@ -12,6 +12,7 @@ cortex_communications.json
 cortex_ai_selection.json
 cortex_scheduler_state.json
 cortex_runtime_state.json
+.cortex_stripe_credentials.json
 generated_products/
 deliveries/
 .env
