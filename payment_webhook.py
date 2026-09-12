@@ -83,14 +83,10 @@ def _parse_event(raw_body):
     return payload if isinstance(payload, dict) else None
 
 
-def process_webhook(raw_body, signature, secret=None):
-    if not verify_signature(raw_body, signature, secret):
-        return {"ok": False, "status": 401, "error": "invalid signature"}
-
-    event = _parse_event(raw_body)
-    if event is None:
-        return {"ok": False, "status": 400, "error": "invalid JSON payload"}
-
+def process_event(event):
+    """Process an already-authenticated normalized payment event."""
+    if not isinstance(event, dict):
+        return {"ok": False, "status": 400, "error": "invalid payment event"}
     event_id = str(event.get("event_id", "")).strip()
     event_type = str(event.get("type", "")).strip()
     order_id = str(event.get("order_id", "")).strip()
@@ -128,6 +124,14 @@ def process_webhook(raw_body, signature, secret=None):
     try:
         _save_events(events)
     except OSError:
-        # Payment verification is idempotent for the same transaction; provider retry is safe.
         return {"ok": False, "status": 503, "error": "webhook event store unavailable"}
     return {"ok": True, "status": 200, "event_id": event_id, "order_id": order_id}
+
+
+def process_webhook(raw_body, signature, secret=None):
+    if not verify_signature(raw_body, signature, secret):
+        return {"ok": False, "status": 401, "error": "invalid signature"}
+    event = _parse_event(raw_body)
+    if event is None:
+        return {"ok": False, "status": 400, "error": "invalid JSON payload"}
+    return process_event(event)
