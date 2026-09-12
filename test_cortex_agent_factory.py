@@ -61,7 +61,7 @@ class CortexAgentFactoryTests(unittest.TestCase):
             self.assertEqual(payload["hire_requests"][0]["action"], "research_market")
             self.assertEqual(payload["hired_agents"], [])
 
-    def test_hired_agent_metadata_survives_restart(self):
+    def test_hired_agent_metadata_survives_restart_without_execution(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = str(Path(tmp) / "workforce.json")
             registry = CortexSpecialistRegistry()
@@ -71,9 +71,45 @@ class CortexAgentFactoryTests(unittest.TestCase):
                 purpose="Bounded research", reason="Observed workload",
                 handler=lambda state: {"success": True},
             )
+            restored_registry = CortexSpecialistRegistry()
+            restored = CortexAgentFactory(restored_registry, path)
+            status = restored.status()
+            self.assertEqual(status["hired_agents"], 1)
+            self.assertEqual(status["active_handlers"], 0)
+            self.assertEqual(status["unbound_persisted_agents"], 1)
+            self.assertEqual(restored.roster()[0]["status"], "persisted_unbound")
+            self.assertIsNone(restored_registry.get("research_market"))
+            self.assertFalse(restored.should_hire("research_market", 10))
+
+    def test_persisted_specialist_requires_explicit_rebinding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "workforce.json")
+            factory = CortexAgentFactory(CortexSpecialistRegistry(), path)
+            factory.hire(
+                name="Research Specialist", action="research_market",
+                purpose="Bounded research", reason="Observed workload",
+                handler=lambda state: {"success": True},
+            )
             restored = CortexAgentFactory(CortexSpecialistRegistry(), path)
-            self.assertEqual(restored.status()["hired_agents"], 1)
-            self.assertEqual(restored.roster()[0]["action"], "research_market")
+            rebound = restored.bind_handler(
+                action="research_market", handler=lambda state: {"success": True}
+            )
+            self.assertEqual(rebound.status, "active")
+            self.assertEqual(restored.status()["active_handlers"], 1)
+
+    def test_persisted_arbitrary_action_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workforce.json"
+            path.write_text(json.dumps({
+                "version": "20.4",
+                "hired_agents": [{
+                    "name": "Unsafe", "action": "delete_everything", "purpose": "x",
+                    "created_at": "now", "reason": "x", "status": "active",
+                }],
+                "hire_requests": [],
+            }), encoding="utf-8")
+            factory = CortexAgentFactory(CortexSpecialistRegistry(), str(path))
+            self.assertEqual(factory.status()["hired_agents"], 0)
 
     def test_invalid_persisted_state_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
