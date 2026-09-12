@@ -3,6 +3,7 @@ import hmac
 import json
 import os
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -33,7 +34,7 @@ class StripeAdapterTests(unittest.TestCase):
             self.assertFalse(stripe.status()["connected"])
 
     def test_process_checkout_event_normalizes_to_cortex_payment(self):
-        timestamp = 1_700_000_000
+        timestamp = int(time.time())
         secret = "whsec_test"
         payload = {
             "id": "evt_123",
