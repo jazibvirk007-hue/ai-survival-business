@@ -21,6 +21,7 @@ Cortex is a governed autonomous-business runtime built around one rule:
 - Persistent scheduler with automatic safety pause after repeated failures
 - Bounded decision-only scheduler runner for continuous live observation
 - Browser Command Center, neural communication visualization and voice link
+- Production HTTP adapter exposing live observability and the payment webhook through the same dashboard handler
 
 ## Safety model
 
@@ -40,6 +41,18 @@ python cortex_dashboard.py
 ```
 
 The default local dashboard is served at `http://127.0.0.1:8080`.
+
+For the production HTTP entry point (same dashboard, plus governed live telemetry
+and signed payment webhooks), run:
+
+```bash
+python cortex_production_server.py
+```
+
+The payment webhook endpoint is `POST /api/payment/webhook`. Providers must send
+their signed raw event body using `X-Payment-Signature` (or
+`X-Webhook-Signature`). The server never accepts a client-supplied payment
+confirmation as proof of payment.
 
 For continuous **decision-only** scheduler observation:
 
