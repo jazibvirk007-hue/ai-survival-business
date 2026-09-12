@@ -67,7 +67,7 @@ class TestCortexAutonomousRuntime(unittest.TestCase):
     def test_registered_specialist_is_visible_in_status(self) -> None:
         self.runtime.register("research_market", lambda state: {"success": True})
         status = self.runtime.status()
-        self.assertEqual(status["version"], "20.2")
+        self.assertEqual(status["version"], "20.3")
         self.assertIn("research_market", status["specialist_registry"]["registered_actions"])
         self.assertEqual(status["agent_factory"]["hired_agents"], 0)
 
@@ -99,6 +99,30 @@ class TestCortexAutonomousRuntime(unittest.TestCase):
         self.assertEqual(proposal["request"]["action"], "review_financials")
         self.assertIsNone(self.runtime.specialists.get("review_financials"))
 
+    def test_hiring_recommendations_use_workload_and_skip_staffed_actions(self) -> None:
+        self.runtime.register("research_market", lambda state: {"success": True})
+        recommendations = self.runtime.hiring_recommendations({
+            "specialist_workload": {
+                "research_market": 99,
+                "review_financials": 7,
+                "find_prospects": 3,
+                "send_money": 100,
+            }
+        })
+        actions = [item["action"] for item in recommendations]
+        self.assertEqual(actions[0], "review_financials")
+        self.assertIn("find_prospects", actions)
+        self.assertNotIn("research_market", actions)
+        self.assertNotIn("send_money", actions)
+        self.assertTrue(all(item["execution"] == "not_authorized" for item in recommendations))
+
+    def test_observe_exposes_hiring_recommendations_without_executing(self) -> None:
+        with patch("order_engine.ORDERS_FILE", self.orders), patch("payment_tracker.PAYMENTS_FILE", self.payments):
+            state = self.runtime.observe({"specialist_workload": {"review_financials": 5}})
+        self.assertEqual(state["hiring_recommendations"][0]["action"], "review_financials")
+        self.assertEqual(state["hiring_recommendations"][0]["execution"], "not_authorized")
+        self.assertIsNone(self.runtime.specialists.get("review_financials"))
+
     def test_custom_factory_must_share_runtime_registry(self) -> None:
         with self.assertRaises(ValueError):
             CortexAutonomousRuntime(agent_factory=CortexAgentFactory(CortexSpecialistRegistry()))
@@ -117,8 +141,9 @@ class TestCortexAutonomousRuntime(unittest.TestCase):
 
     def test_status_declares_control_loop(self) -> None:
         status = self.runtime.status()
-        self.assertEqual(status["version"], "20.2")
+        self.assertEqual(status["version"], "20.3")
         self.assertEqual(status["control_loop"], ["observe", "decide", "guard", "execute", "verify", "learn", "repeat"])
+        self.assertEqual(status["hiring_advisor"]["policy"], "evidence_based_non_executing")
 
 
 if __name__ == "__main__":
