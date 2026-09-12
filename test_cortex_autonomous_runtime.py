@@ -65,12 +65,41 @@ class TestCortexAutonomousRuntime(unittest.TestCase):
     def test_registered_specialist_is_visible_in_status(self) -> None:
         self.runtime.register("research_market", lambda state: {"success": True})
         status = self.runtime.status()
-        self.assertEqual(status["version"], "19.1")
+        self.assertEqual(status["version"], "20.0")
         self.assertIn("research_market", status["specialist_registry"]["registered_actions"])
+        self.assertEqual(status["agent_factory"]["hired_agents"], 0)
+
+    def test_hire_agent_creates_and_registers_missing_specialist(self) -> None:
+        def handler(state):
+            return {"success": True, "agent": "pricing"}
+
+        hired = self.runtime.hire_agent(
+            name="Pricing Specialist",
+            action="improve_offer",
+            purpose="Optimize offer pricing from observed business outcomes",
+            reason="Observed workload requires offer optimization capacity",
+            handler=handler,
+            observed_workload=3,
+        )
+        self.assertEqual(hired.action, "improve_offer")
+        self.assertIsNotNone(self.runtime.specialists.get("improve_offer"))
+        self.assertEqual(self.runtime.agent_factory.status()["hired_agents"], 1)
+
+    def test_hire_agent_does_not_duplicate_staffed_action(self) -> None:
+        self.runtime.register("research_market", lambda state: {"success": True})
+        with self.assertRaises(ValueError):
+            self.runtime.hire_agent(
+                name="Second Research Specialist",
+                action="research_market",
+                purpose="Duplicate research capacity",
+                reason="Duplicate staffing should be rejected",
+                handler=lambda state: None,
+                observed_workload=5,
+            )
 
     def test_status_declares_control_loop(self) -> None:
         status = self.runtime.status()
-        self.assertEqual(status["version"], "19.1")
+        self.assertEqual(status["version"], "20.0")
         self.assertEqual(status["control_loop"], ["observe", "decide", "guard", "execute", "verify", "learn", "repeat"])
 
 
