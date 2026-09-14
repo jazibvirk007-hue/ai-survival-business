@@ -1,8 +1,4 @@
-"""Deterministic, rights-first domain primitives for YT Autopilot.
-
-The module deliberately contains no network access, shell execution, or credential handling.
-External providers plug into these contracts from worker processes.
-"""
+"""Deterministic, rights-first domain primitives for YT Autopilot."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
@@ -61,6 +57,8 @@ class RightsRecord:
     attribution_text: str = ""
     verification_status: RightsStatus = RightsStatus.UNKNOWN
     verified_at: float = field(default_factory=time.time)
+    download_date: float | None = None
+    evidence: tuple[str, ...] = ()
 
     def publishable(self) -> bool:
         return self.verification_status in {
@@ -108,17 +106,11 @@ class TopicScore:
     monetization: float
 
     def final(self) -> float:
-        # Higher competition/difficulty reduce the score; footage availability is deliberately strong.
         value = (
-            0.12 * self.trend
-            + 0.13 * self.search_demand
-            - 0.08 * self.competition
-            + 0.10 * self.content_gap
-            + 0.08 * self.evergreen
-            + 0.16 * self.audience_relevance
-            + 0.20 * self.footage_availability
-            - 0.07 * self.production_difficulty
-            + 0.10 * self.monetization
+            0.12 * self.trend + 0.13 * self.search_demand - 0.08 * self.competition
+            + 0.10 * self.content_gap + 0.08 * self.evergreen
+            + 0.16 * self.audience_relevance + 0.20 * self.footage_availability
+            - 0.07 * self.production_difficulty + 0.10 * self.monetization
         )
         return round(max(0.0, min(100.0, value)), 2)
 
@@ -149,11 +141,13 @@ class QCReport:
 
 
 def rights_gate(assets: list[Asset], music: list[Asset] | None = None) -> tuple[bool, list[str]]:
-    """Hard publish gate: every visual/music asset must have explicit reusable rights."""
+    """Hard gate: every visual/audio asset needs explicit reusable rights evidence."""
     failures: list[str] = []
     for asset in [*assets, *(music or [])]:
         if not asset.publishable():
             failures.append(f"{asset.asset_id}: rights={asset.rights.verification_status.value}")
+        elif not asset.rights.evidence:
+            failures.append(f"{asset.asset_id}: rights evidence is missing")
     return not failures, failures
 
 
@@ -169,7 +163,6 @@ def originality_score(original_narration: float, original_structure: float,
 def reused_content_risk(source_footage_pct: float, original_narration: float,
                         transformation: float, source_diversity: float,
                         commentary: float, graphics: float) -> float:
-    """Returns 0-100 where higher means greater reused-content risk."""
     risk = (0.30 * source_footage_pct + 0.18 * (100 - original_narration) +
             0.20 * (100 - transformation) + 0.10 * (100 - source_diversity) +
             0.15 * (100 - commentary) + 0.07 * (100 - graphics))
@@ -177,7 +170,6 @@ def reused_content_risk(source_footage_pct: float, original_narration: float,
 
 
 def serialise(value: Any) -> str:
-    """Stable JSON representation for audit/event payloads."""
     return json.dumps(asdict(value) if hasattr(value, "__dataclass_fields__") else value,
                       default=lambda x: x.value if isinstance(x, Enum) else str(x),
                       sort_keys=True, separators=(",", ":"))
