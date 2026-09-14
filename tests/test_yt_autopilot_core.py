@@ -1,6 +1,6 @@
 import unittest
 from yt_autopilot.core import (
-    Asset, ClaimCheck, RightsRecord, RightsStatus, TopicScore,
+    Asset, RightsRecord, RightsStatus, TopicScore,
     originality_score, reused_content_risk, rights_gate,
 )
 from yt_autopilot.state_machine import Pipeline
@@ -8,7 +8,7 @@ from yt_autopilot.core import PipelineState
 
 
 class CoreTests(unittest.TestCase):
-    def asset(self, status=RightsStatus.VERIFIED_REUSABLE):
+    def asset(self, status=RightsStatus.VERIFIED_REUSABLE, evidence=("https://example.test/license",)):
         rights = RightsRecord(
             source_url="https://example.test/a",
             source_name="Test Archive",
@@ -16,16 +16,22 @@ class CoreTests(unittest.TestCase):
             commercial_use_allowed=True,
             modification_allowed=True,
             verification_status=status,
+            evidence=evidence,
         )
         return Asset("https://example.test/a", "Test Archive", rights)
 
-    def test_rights_gate_accepts_verified_assets(self):
+    def test_rights_gate_accepts_verified_assets_with_evidence(self):
         self.assertEqual(rights_gate([self.asset()]), (True, []))
 
     def test_rights_gate_rejects_unknown_assets(self):
         ok, failures = rights_gate([self.asset(RightsStatus.UNKNOWN)])
         self.assertFalse(ok)
         self.assertTrue(failures)
+
+    def test_rights_gate_rejects_missing_evidence(self):
+        ok, failures = rights_gate([self.asset(evidence=())])
+        self.assertFalse(ok)
+        self.assertIn("rights evidence is missing", failures[0])
 
     def test_topic_score_bounds_and_footage_weight(self):
         score = TopicScore(90, 80, 20, 80, 60, 90, 100, 20, 70).final()
