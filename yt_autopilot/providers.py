@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, Sequence
-from .core import Asset, RightsRecord
+from .core import Asset
 
 
 class LLMProvider(Protocol):
@@ -27,6 +27,11 @@ class YouTubeProvider(Protocol):
     def set_thumbnail(self, video_id: str, image_path: str) -> None: ...
 
 
+class AnalyticsProvider(Protocol):
+    def video_metrics(self, video_id: str) -> dict[str, float]: ...
+    def channel_metrics(self, channel_id: str) -> dict[str, float]: ...
+
+
 class StorageProvider(Protocol):
     def put(self, local_path: str, key: str) -> str: ...
     def delete(self, key: str) -> None: ...
@@ -34,10 +39,11 @@ class StorageProvider(Protocol):
 
 @dataclass(frozen=True)
 class ProviderRegistry:
-    """Dependency-injection container; no persisted record becomes executable code."""
+    """Dependency-injection container; persisted records are data, never executable code."""
     llm: LLMProvider | None = None
     tts: TTSProvider | None = None
     media_search: MediaSearchProvider | None = None
     media_download: MediaDownloadProvider | None = None
     youtube: YouTubeProvider | None = None
+    analytics: AnalyticsProvider | None = None
     storage: StorageProvider | None = None
